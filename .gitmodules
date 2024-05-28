@@ -1,0 +1,3 @@
+[submodule "RicoNeuralNetPrototype/n-digit-mnist"]
+	path = RicoNeuralNetPrototype/n-digit-mnist
+	url = https://github.com/google/n-digit-mnist
