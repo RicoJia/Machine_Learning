@@ -171,8 +171,6 @@ class RicoNeuralNet:
                 )
         del_j_del_zs.reverse()
 
-        # TODO Remember to remove
-        print(f"Rico: ======================")
         for l in range(LAYER_NUM):
             # p x m @ m x n
             del_j_del_w = del_j_del_zs[l] @ self.a[l].T / self.a[l].shape[1]
@@ -180,10 +178,10 @@ class RicoNeuralNet:
             bias_gradient = np.mean(del_j_del_zs[l], axis=1, keepdims=True)
             # keepdims will make sure it's (p,1) array, not a (p, ) array
             self._biases[l] -= self._learning_rate * bias_gradient
-            # TODO Remember to remove
-            print(f"del_j_del_zs:\n{del_j_del_zs}")
-            # TODO Remember to remove
-            print(f"w grad: {del_j_del_w}")
+            # # TODO Remember to remove
+            # print(f"del_j_del_zs:\n{del_j_del_zs}")
+            # # TODO Remember to remove
+            # print(f"w grad: {del_j_del_w}")
 
     def save_model(self):
         np.savez(MODEL_WEIGHTS_FILE, weights=self._weights, biases=self._biases)
@@ -196,8 +194,8 @@ class RicoNeuralNet:
         self._biases = data["biases"]
         print(f"Weights initialized with pretrained data.")
 
-    def predict(self, input):
-        return self.forward(input)
+    def predict(self, inputs):
+        return self.forward(inputs)
 
 
 ################################
@@ -297,9 +295,6 @@ def test_with_mnist():
     x_train, y_train = mnist_preprocess(x_train, y_train)
     x_test, y_test = mnist_preprocess(x_test, y_test)
 
-    # TODO Remember to remove
-    print(f"{x_test[:10].shape}")
-
     TEST_BATCH_SIZE = 50
     EPOCH_NUM = 100
     rico_neural_net = RicoNeuralNet(
@@ -327,5 +322,5 @@ def test_with_mnist():
 
 
 if __name__ == "__main__":
-    # test_with_xor()
-    test_with_mnist()
+    test_with_xor()
+    # test_with_mnist()
