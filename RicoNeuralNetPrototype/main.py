@@ -158,6 +158,15 @@ class RicoNeuralNet:
         # input is mxn
         return self.forward(inputs=inputs)
 
+    def save_model(self):
+        np.savez(MODEL_WEIGHTS_FILE, weights=self._weights, biases=self._biases)
+
+    def load_model(self):
+        data = np.load(MODEL_WEIGHTS_FILE, allow_pickle=True)
+        self._weights = data["weights"]
+        self._biases = data["biases"]
+
+
 ################################
 # Test Functions
 ################################
@@ -191,7 +200,6 @@ def test_with_xor():
             loss = mean_squared_error(targets, outputs, derivative=False)
             print(f"epoch: {epoch}, loss: {loss}")
     pred = rico_neural_net.predict(inputs=inputs)
-    # TODO Remember to remove
     print(f"Final prediction: \n{pred}")
 
 
@@ -216,7 +224,7 @@ def create_mini_batches(x, y, batch_size: int):
     return mini_batches
 
 
-def test_with_mnist():
+def test_with_mnist(load_save_model: bool = False):
     X_TRAIN_FILE, X_TEST_FILE, Y_TRAIN_FILE, Y_TEST_FILE = (
         "x_train.npy",
         "x_test.npy",
@@ -238,7 +246,6 @@ def test_with_mnist():
         np.save("y_train.npy", y_train)
         np.save("x_test.npy", x_test)
         np.save("y_test.npy", y_test)
-        # TODO Remember to remove
         print(
             f"Saved mnist data to {X_TEST_FILE, Y_TEST_FILE, X_TRAIN_FILE, Y_TRAIN_FILE}"
         )
@@ -253,9 +260,10 @@ def test_with_mnist():
     # plot_images(x_train, y_train, num_rows=4, num_cols=4)
 
     x_train, y_train = mnist_preprocess(x_train, y_train)
+    x_test_cp = x_test.copy()
     x_test, y_test = mnist_preprocess(x_test, y_test)
 
-    TEST_BATCH_SIZE = 50
+    TEST_BATCH_SIZE = x_test.shape[0]
     EPOCH_NUM = 100
     rico_neural_net = RicoNeuralNet(
         io_dimensions=[784, 128, 64, 10],
@@ -264,20 +272,30 @@ def test_with_mnist():
         # activation_func=sigmoid,
         # cost_func=mean_squared_error,
     )
-    for epoch in range(EPOCH_NUM):
-        batches = create_mini_batches(x_train, y_train, batch_size=60)
-        for inputs, targets in batches:
-            outputs = rico_neural_net.forward(inputs)
-            rico_neural_net.backward(targets)
-        if epoch % 4 == 0:
-            loss = mean_squared_error(targets, outputs, derivative=False)
-            print(f"epoch: {epoch}, loss: {loss}")
+    if load_save_model:
+        try:
+            rico_neural_net.load_model()
+        except FileNotFoundError:
+            pass
+    # for epoch in range(EPOCH_NUM):
+    #     batches = create_mini_batches(x_train, y_train, batch_size=60)
+    #     for inputs, targets in batches:
+    #         outputs = rico_neural_net.forward(inputs)
+    #         rico_neural_net.backward(targets)
+    #         if load_save_model:
+    #             rico_neural_net.save_model()
+    #     if epoch % 4 == 0:
+    #         loss = mean_squared_error(targets, outputs, derivative=False)
+    #         print(f"epoch: {epoch}, loss: {loss}")
     # rico_neural_net.save_model()
     pred = np.argmax(rico_neural_net.predict(inputs=x_test[:TEST_BATCH_SIZE]), axis=1)
     print(f"Final prediction: \n{pred}")
     print(f"test labels: \n{np.argmax(y_test[:TEST_BATCH_SIZE], axis=1)}")
+    y_test = np.argmax(y_test, axis=1)
+    print(f"Accuracy: {np.count_nonzero(y_test == pred) / TEST_BATCH_SIZE}")
+    plot_images(images=x_test_cp, labels=pred, num_cols=10, num_rows=10)
 
 
 if __name__ == "__main__":
     # test_with_xor()
-    test_with_mnist()
+    test_with_mnist(load_save_model=True)
