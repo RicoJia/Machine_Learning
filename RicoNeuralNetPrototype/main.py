@@ -94,15 +94,7 @@ def bias_init(shape):
 # Neural Network Impl
 ################################
 class RicoNeuralNet:
-    def __init__(
-        self,
-        io_dimensions: List,
-        learning_rate: float,
-        momentum: float,
-        activation_func=sigmoid,
-        cost_func=mean_squared_error,
-        skip_output_activation=False,
-    ):
+    def __init__(self, io_dimensions: List, learning_rate: float, momentum: float):
         # io_dimensions is something like [2,3,1], where the input dimension is 2, output dimension is 1
         # w : [np.array([]), ...], b: [np.arrays([1,2,3]), ...]
         if len(io_dimensions) < 2:
@@ -112,38 +104,25 @@ class RicoNeuralNet:
         self._io_dimensions = io_dimensions
         self._momentum = momentum
         self._learning_rate = learning_rate
-        self._activation_func = activation_func
-        self._cost_func = cost_func
-        self._skip_output_activation = skip_output_activation
-
         # each weight is p*n: [[node1_1, node1_2, node1_3], [node2_1, ...]]. The number of nodes at each layer is determined by
         # the number of the layer ouptuts
         # Bias: [bias_node_1, bias_node_2, ...]
-        try:
-            self.load_model()
-        except FileNotFoundError:
-            self._weights = [
-                he_init((io_dimensions[i], io_dimensions[i - 1]))
-                for i in range(1, len(self._io_dimensions))
-            ]
-            self._biases = [
-                bias_init((io_dimensions[i], 1))
-                for i in range(1, len(self._io_dimensions))
-            ]
-            print(f"Weights initialized randomly.")
+        self._weights = [
+            he_init((io_dimensions[i], io_dimensions[i - 1]))
+            for i in range(1, len(self._io_dimensions))
+        ]
+        self._biases = [
+            bias_init((io_dimensions[i], 1)) for i in range(1, len(self._io_dimensions))
+        ]
 
     def forward(self, inputs):
         # [[x1, x2, x3], [layer2]], n x m
         self.a = [np.asarray(inputs).T]
         self.z = []
-        LAYER_NUM = len(self._weights)
         # weights: p x n, p is output size, where n is input size, bias: p*1
-        for i, (weights, bias) in enumerate(zip(self._weights, self._biases)):
+        for weights, bias in zip(self._weights, self._biases):
             self.z.append(weights @ self.a[-1] + bias)  # p * m
-            if i == LAYER_NUM - 1:
-                self.a.append(self.z[-1])
-            else:
-                self.a.append(self._activation_func(self.z[-1], derivative=False))
+            self.a.append(sigmoid(self.z[-1], derivative=False))
         # returning [[a1], [a2]...], mxp
         return self.a[-1].T
 
@@ -152,9 +131,9 @@ class RicoNeuralNet:
     def backward(self, targets):
         # targets: mxp -> pxm
         targets = np.asarray(targets).T
-        del_j_del_a = self._cost_func(targets, self.a[-1], derivative=True)  # pxm
+        del_j_del_a = mean_squared_error(targets, self.a[-1], derivative=True)  # pxm
         del_j_del_zs = [
-            del_j_del_a * self._activation_func(self.z[-1], derivative=True)
+            del_j_del_a * sigmoid(self.z[-1], derivative=True)
         ]  # elementwise multiplication, pxm
         LAYER_NUM = len(self._weights)
         for l in range(1, LAYER_NUM):
@@ -162,13 +141,9 @@ class RicoNeuralNet:
             # all nodes on the next layer.
             del_j_del_a = self._weights[LAYER_NUM - l].T @ del_j_del_zs[-1]
             # z needs to be on the current layer for sigmoid
-            if self._skip_output_activation and l == LAYER_NUM - 1:
-                del_j_del_zs.append(del_j_del_a)
-            else:
-                del_j_del_zs.append(
-                    del_j_del_a
-                    * self._activation_func(self.z[LAYER_NUM - l - 1], derivative=True)
-                )
+            del_j_del_zs.append(
+                del_j_del_a * sigmoid(self.z[LAYER_NUM - l - 1], derivative=True)
+            )
         del_j_del_zs.reverse()
 
         for l in range(LAYER_NUM):
@@ -176,27 +151,12 @@ class RicoNeuralNet:
             del_j_del_w = del_j_del_zs[l] @ self.a[l].T / self.a[l].shape[1]
             self._weights[l] -= self._learning_rate * del_j_del_w
             bias_gradient = np.mean(del_j_del_zs[l], axis=1, keepdims=True)
-            # keepdims will make sure it's (p,1) array, not a (p, ) array
+            #     # keepdims will make sure it's (p,1) array, not a (p, ) array
             self._biases[l] -= self._learning_rate * bias_gradient
-            # # TODO Remember to remove
-            # print(f"del_j_del_zs:\n{del_j_del_zs}")
-            # # TODO Remember to remove
-            # print(f"w grad: {del_j_del_w}")
-
-    def save_model(self):
-        np.savez(MODEL_WEIGHTS_FILE, weights=self._weights, biases=self._biases)
-        # TODO Remember to remove
-        print(f"Rico: weights and biases are saved to {MODEL_WEIGHTS_FILE}")
-
-    def load_model(self):
-        data = np.load(MODEL_WEIGHTS_FILE, allow_pickle=True)
-        self._weights = data["weights"]
-        self._biases = data["biases"]
-        print(f"Weights initialized with pretrained data.")
 
     def predict(self, inputs):
-        return self.forward(inputs)
-
+        # input is mxn
+        return self.forward(inputs=inputs)
 
 ################################
 # Test Functions
@@ -217,9 +177,9 @@ def test_with_xor():
         io_dimensions=[2, 3, 1],
         learning_rate=0.1,
         momentum=0.01,
-        activation_func=relu,
-        cost_func=mean_squared_error,
-        skip_output_activation=True,
+        # activation_func=relu,
+        # cost_func=mean_squared_error,
+        # skip_output_activation=True,
     )
     inputs = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
     targets = np.array([[0], [1], [1], [0]])
@@ -299,10 +259,10 @@ def test_with_mnist():
     EPOCH_NUM = 100
     rico_neural_net = RicoNeuralNet(
         io_dimensions=[784, 128, 64, 10],
-        learning_rate=0.005,
+        learning_rate=0.1,
         momentum=0.01,
-        activation_func=sigmoid,
-        cost_func=mean_squared_error,
+        # activation_func=sigmoid,
+        # cost_func=mean_squared_error,
     )
     for epoch in range(EPOCH_NUM):
         batches = create_mini_batches(x_train, y_train, batch_size=60)
@@ -310,17 +270,14 @@ def test_with_mnist():
             outputs = rico_neural_net.forward(inputs)
             rico_neural_net.backward(targets)
         if epoch % 4 == 0:
-            loss = binary_cross_entropy(targets, outputs, derivative=False)
+            loss = mean_squared_error(targets, outputs, derivative=False)
             print(f"epoch: {epoch}, loss: {loss}")
-    rico_neural_net.save_model()
+    # rico_neural_net.save_model()
     pred = np.argmax(rico_neural_net.predict(inputs=x_test[:TEST_BATCH_SIZE]), axis=1)
-    # pred = np.argmax(rico_neural_net.predict(inputs=x_train[:TEST_BATCH_SIZE]), axis=1)
-    # #TODO Remember to remove
-    # print(f'Rico: ')
     print(f"Final prediction: \n{pred}")
     print(f"test labels: \n{np.argmax(y_test[:TEST_BATCH_SIZE], axis=1)}")
 
 
 if __name__ == "__main__":
-    test_with_xor()
-    # test_with_mnist()
+    # test_with_xor()
+    test_with_mnist()
