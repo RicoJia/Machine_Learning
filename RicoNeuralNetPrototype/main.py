@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+Areas of improvement
+1. He initialization should only be used with ReLU. Xavier should be used with tanh/sigmoid
+2. Gradient Check
+
+"""
 from collections import deque
 from typing import List
 
@@ -9,6 +15,9 @@ from keras.utils import to_categorical
 # npz files are compressed file for multiple numpy arrays
 # npy files are binary files
 MODEL_WEIGHTS_FILE = "rico_net_weights.npz"
+HUBER_LOSS_DELTA = 0.1
+L1_LAMBDA = 0.01
+L2_LAMBDA = 0.01
 
 
 ################################
@@ -29,10 +38,6 @@ def relu(z, derivative=False):
         return np.maximum(z, 0)
 
 
-def rounding_thresholding(z):
-    return np.round(z)
-
-
 def sigmoid(z, derivative=False):
     if derivative:
         s = 1 / (1 + np.exp(-z))
@@ -41,28 +46,56 @@ def sigmoid(z, derivative=False):
 
 
 ################################
+# Regularization Functions
+################################
+def L1_Regularization(w: np.ndarray, derivative=False):
+    if derivative:
+        return L1_LAMBDA * np.sign(w)
+    else:
+        # TODO: double check
+        return L1_LAMBDA * np.sum(np.abs(w))
+
+
+def L2_Regularization(w: np.ndarray, derivative=False):
+    if derivative:
+        return L2_LAMBDA * w
+    else:
+        # TODO: double check
+        return L2_LAMBDA * w.T @ w
+
+
+def no_regularization(w: np.ndarray, derivative=False):
+    return 0
+
+
+################################
 # Cost Functions
 ################################
-def mean_squared_error(
-    targets: np.ndarray, forward_output: np.ndarray, derivative=False
-):
-    # The final cost is a single value, across all features, and samples sum (y-a) / m
-    # targets = [[output vector1], [output vector2] ...], m x p
+def shape_check(targets: np.ndarray, forward_output: np.ndarray):
     if targets.shape != forward_output.shape:
         raise ValueError(
             "Targets must have the same shape as forward_output. "
             f"Target shape: {targets.shape}, forward output shape: {forward_output.shape}"
         )
-    if not derivative:
-        return np.mean((targets - forward_output) ** 2)
-    else:
+
+
+def mean_squared_error(
+    targets: np.ndarray, forward_output: np.ndarray, derivative=False
+):
+    # The final cost is a single value, across all features, and samples sum (y-a) / m
+    # targets = [[output vector1], [output vector2] ...], m x p
+    shape_check(targets=targets, forward_output=forward_output)
+    if derivative:
         # del J / del a = [a-y]/m, where a is m x n. return value is 1 x n
         return forward_output - targets
+    else:
+        return np.mean((targets - forward_output) ** 2)
 
 
 def binary_cross_entropy(
     targets: np.ndarray, forward_output: np.ndarray, derivative=False
 ):
+    shape_check(targets=targets, forward_output=forward_output)
     p = sigmoid(forward_output)
     if derivative:
         return p - targets
@@ -72,17 +105,43 @@ def binary_cross_entropy(
         return -np.mean(targets * np.log(p) + (1 - targets) * np.log(1 - p))
 
 
+def mean_absolute_error(
+    targets: np.ndarray, forward_output: np.ndarray, derivative=False
+):
+    shape_check(targets=targets, forward_output=forward_output)
+    if derivative:
+        return np.where(targets > forward_output, 1, 0)
+    else:
+        return np.mean(np.abs(targets - forward_output))
+
+
+def huber_loss(targets: np.ndarray, forward_output: np.ndarray, derivative=False):
+    shape_check(targets=targets, forward_output=forward_output)
+    error = targets - forward_output
+    is_small_error = np.abs(error) <= HUBER_LOSS_DELTA
+    if derivative:
+        squared_derivative = -error
+        mae_derivative = -HUBER_LOSS_DELTA * np.sign(error)
+        return np.where(is_small_error, squared_derivative, mae_derivative)
+    else:
+        squared_loss = 0.5 * error**2
+        mae = HUBER_LOSS_DELTA * (np.abs(error) - 0.5 * HUBER_LOSS_DELTA)
+        return np.where(is_small_error, squared_loss, mae)
+
+
 ################################
 # Weight Initialization Functions
 ################################
 
 
 def xavier_init(shape):
+    # For Sigmoid and Tanh
     return np.random.randn(*shape) * np.sqrt(2 / (shape[0] + shape[1]))
 
 
 # TODO: what are these init functions?
 def he_init(shape):
+    # For ReLU
     return np.random.randn(*shape) * np.sqrt(2 / shape[0])
 
 
@@ -114,6 +173,17 @@ class RicoNeuralNet:
         self._biases = [
             bias_init((io_dimensions[i], 1)) for i in range(1, len(self._io_dimensions))
         ]
+        self.set_funcs()  # Use default values
+
+    def set_funcs(
+        self,
+        activation_func=sigmoid,
+        cost_func=mean_squared_error,
+        regularization_func=no_regularization,
+    ):
+        self._activation_func = activation_func
+        self._cost_func = cost_func
+        self._regularization_func = regularization_func
 
     def forward(self, inputs):
         # [[x1, x2, x3], [layer2]], n x m
@@ -122,7 +192,7 @@ class RicoNeuralNet:
         # weights: p x n, p is output size, where n is input size, bias: p*1
         for weights, bias in zip(self._weights, self._biases):
             self.z.append(weights @ self.a[-1] + bias)  # p * m
-            self.a.append(sigmoid(self.z[-1], derivative=False))
+            self.a.append(self._activation_func(self.z[-1], derivative=False))
         # returning [[a1], [a2]...], mxp
         return self.a[-1].T
 
@@ -131,9 +201,9 @@ class RicoNeuralNet:
     def backward(self, targets):
         # targets: mxp -> pxm
         targets = np.asarray(targets).T
-        del_j_del_a = mean_squared_error(targets, self.a[-1], derivative=True)  # pxm
+        del_j_del_a = self._cost_func(targets, self.a[-1], derivative=True)  # pxm
         del_j_del_zs = [
-            del_j_del_a * sigmoid(self.z[-1], derivative=True)
+            del_j_del_a * self._activation_func(self.z[-1], derivative=True)
         ]  # elementwise multiplication, pxm
         LAYER_NUM = len(self._weights)
         for l in range(1, LAYER_NUM):
@@ -142,13 +212,18 @@ class RicoNeuralNet:
             del_j_del_a = self._weights[LAYER_NUM - l].T @ del_j_del_zs[-1]
             # z needs to be on the current layer for sigmoid
             del_j_del_zs.append(
-                del_j_del_a * sigmoid(self.z[LAYER_NUM - l - 1], derivative=True)
+                del_j_del_a
+                * self._activation_func(self.z[LAYER_NUM - l - 1], derivative=True)
             )
         del_j_del_zs.reverse()
 
         for l in range(LAYER_NUM):
             # p x m @ m x n
-            del_j_del_w = del_j_del_zs[l] @ self.a[l].T / self.a[l].shape[1]
+            del_j_del_w = del_j_del_zs[l] @ self.a[l].T / self.a[l].shape[
+                1
+            ] + self._regularization_func(self._weights[l], derivative=True)
+            # TODO Remember to remove
+            print(f"{del_j_del_w}")
             self._weights[l] -= self._learning_rate * del_j_del_w
             bias_gradient = np.mean(del_j_del_zs[l], axis=1, keepdims=True)
             #     # keepdims will make sure it's (p,1) array, not a (p, ) array
@@ -186,9 +261,11 @@ def test_with_xor():
         io_dimensions=[2, 3, 1],
         learning_rate=0.1,
         momentum=0.01,
-        # activation_func=relu,
-        # cost_func=mean_squared_error,
-        # skip_output_activation=True,
+    )
+    rico_neural_net.set_funcs(
+        activation_func=sigmoid,
+        cost_func=mean_squared_error,
+        regularization_func=L2_Regularization,
     )
     inputs = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
     targets = np.array([[0], [1], [1], [0]])
@@ -225,6 +302,20 @@ def create_mini_batches(x, y, batch_size: int):
 
 
 def test_with_mnist(load_save_model: bool = False):
+    """
+    Training Summary:
+    - mean_squared_error: Sigmoid: ~95%, tanh: ~29%, relu: ~10%
+        - With L1 regularization: relu didn't learn, sigmoid loss oscillated, (similar to a P controller?)
+        - With L2 Regularization: sigmoid loss oscillated, (similar to a P controller?)
+    - mean absolute error
+    - huber loss:
+        - relu (always in mae zone, effectively using mean squared error): 49%. (spiraling downwards);
+        - sigmoid (always in mae zone), ~76%
+        - With L1 loss: sigmoid loss oscillates around 0.09, relu: not learning and stuck around 0.1
+
+    Args:
+        load_save_model (bool, optional): _description_. Defaults to False.
+    """
     X_TRAIN_FILE, X_TEST_FILE, Y_TRAIN_FILE, Y_TEST_FILE = (
         "x_train.npy",
         "x_test.npy",
@@ -256,38 +347,42 @@ def test_with_mnist(load_save_model: bool = False):
     # training set: (60000, 28, 28), (60000, )
     # test set: (10000, 28, 28), (10000, )
 
-    # Plot 16 images from the training set
-    # plot_images(x_train, y_train, num_rows=4, num_cols=4)
-
     x_train, y_train = mnist_preprocess(x_train, y_train)
     x_test_cp = x_test.copy()
     x_test, y_test = mnist_preprocess(x_test, y_test)
 
     TEST_BATCH_SIZE = x_test.shape[0]
-    EPOCH_NUM = 100
+    EPOCH_NUM = 80
     rico_neural_net = RicoNeuralNet(
         io_dimensions=[784, 128, 64, 10],
         learning_rate=0.1,
         momentum=0.01,
-        # activation_func=sigmoid,
-        # cost_func=mean_squared_error,
     )
+    rico_neural_net.set_funcs(
+        activation_func=sigmoid,
+        cost_func=mean_squared_error,
+        regularization_func=L2_Regularization,
+    )
+    # rico_neural_net.set_funcs(
+    #     activation_func=sigmoid,
+    #     cost_func=mean_squared_error,
+    # )
     if load_save_model:
         try:
             rico_neural_net.load_model()
         except FileNotFoundError:
             pass
-    # for epoch in range(EPOCH_NUM):
-    #     batches = create_mini_batches(x_train, y_train, batch_size=60)
-    #     for inputs, targets in batches:
-    #         outputs = rico_neural_net.forward(inputs)
-    #         rico_neural_net.backward(targets)
-    #         if load_save_model:
-    #             rico_neural_net.save_model()
-    #     if epoch % 4 == 0:
-    #         loss = mean_squared_error(targets, outputs, derivative=False)
-    #         print(f"epoch: {epoch}, loss: {loss}")
-    # rico_neural_net.save_model()
+    for epoch in range(EPOCH_NUM):
+        batches = create_mini_batches(x_train, y_train, batch_size=60)
+        for inputs, targets in batches:
+            outputs = rico_neural_net.forward(inputs)
+            rico_neural_net.backward(targets)
+            if load_save_model:
+                rico_neural_net.save_model()
+        if epoch % 4 == 0:
+            loss = mean_squared_error(targets, outputs, derivative=False)
+            print(f"epoch: {epoch}, loss: {loss}")
+    rico_neural_net.save_model()
     pred = np.argmax(rico_neural_net.predict(inputs=x_test[:TEST_BATCH_SIZE]), axis=1)
     print(f"Final prediction: \n{pred}")
     print(f"test labels: \n{np.argmax(y_test[:TEST_BATCH_SIZE], axis=1)}")
@@ -297,5 +392,5 @@ def test_with_mnist(load_save_model: bool = False):
 
 
 if __name__ == "__main__":
-    # test_with_xor()
+    test_with_xor()
     test_with_mnist(load_save_model=True)
