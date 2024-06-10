@@ -10,7 +10,6 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
-from keras.utils import to_categorical
 
 # npz files are compressed file for multiple numpy arrays
 # npy files are binary files
@@ -281,6 +280,7 @@ def test_with_xor():
 
 
 def mnist_preprocess(x, y):
+    from keras.utils import to_categorical
     # Normalize the data
     x = x / 255.0
     x = x.reshape(x.shape[0], -1)
