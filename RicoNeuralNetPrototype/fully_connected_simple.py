@@ -225,7 +225,7 @@ class RicoNeuralNet:
             print(f"{del_j_del_w}")
             self._weights[l] -= self._learning_rate * del_j_del_w
             bias_gradient = np.mean(del_j_del_zs[l], axis=1, keepdims=True)
-            #     # keepdims will make sure it's (p,1) array, not a (p, ) array
+            # keepdims will make sure it's (p,1) array, not a (p, ) array
             self._biases[l] -= self._learning_rate * bias_gradient
 
     def predict(self, inputs):
@@ -281,6 +281,7 @@ def test_with_xor():
 
 def mnist_preprocess(x, y):
     from keras.utils import to_categorical
+
     # Normalize the data
     x = x / 255.0
     x = x.reshape(x.shape[0], -1)
