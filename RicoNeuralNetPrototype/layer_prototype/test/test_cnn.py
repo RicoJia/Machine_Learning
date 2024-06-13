@@ -1,14 +1,9 @@
 import numpy as np
 import torch
 
-from RicoNeuralNetPrototype.layer_prototype.cnn import (
-    SGD,
-    Conv2d,
-    Flatten,
-    MaxPool2D,
-    MSELoss,
-    ReLU,
-)
+from RicoNeuralNetPrototype.layer_prototype.cnn import (SGD, Conv2d, Flatten,
+                                                        MaxPool2D, MSELoss,
+                                                        ReLU)
 
 a = np.array(
     [
@@ -131,7 +126,7 @@ def backward_prop_test(conv, torch_conv, input_tensor, torch_output):
 
 def optimize_test(conv, torch_conv):
     assert np.allclose(conv.weights, torch_conv.weight.detach().numpy())
-    assert np.allclose(conv.biases, torch_conv.bias.detach().numpy())
+    assert np.allclose(conv.bias, torch_conv.bias.detach().numpy())
 
     rico_optimizer = SGD(layers=[conv], lr=0.1)
     rico_optimizer.step()  # Update the weights
@@ -139,7 +134,7 @@ def optimize_test(conv, torch_conv):
     optimizer = torch.optim.SGD(torch_conv.parameters(), lr=0.1)
     optimizer.step()  # Update the weights
     assert np.allclose(conv.weights, torch_conv.weight.detach().numpy())
-    assert np.allclose(conv.biases, torch_conv.bias.detach().numpy())
+    assert np.allclose(conv.bias, torch_conv.bias.detach().numpy())
 
 
 def test_cnn():

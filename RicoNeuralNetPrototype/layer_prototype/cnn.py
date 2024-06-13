@@ -19,23 +19,6 @@ def he_init(shape):
 
 
 ################################
-# Optimizer
-################################
-class SGD:
-    def __init__(self, layers: List, lr=1e-3):
-        self.lr = lr
-        self.layers = layers
-
-    def step(
-        self,
-    ):
-        for layer in self.layers:
-            layer.weights -= self.lr * layer.weights_gradient
-            # sum across batch, image dimensions. Because bias is applied output per channel
-            layer.biases -= self.lr * np.sum(layer.output_gradient, axis=(0, 2, 3))
-
-
-################################
 # Activation Functions
 ################################
 class Sigmoid:
@@ -57,7 +40,10 @@ class ReLU:
 ################################
 # Cost Functions
 ################################
-class MSELoss:
+class Loss:
+    def backward(self) -> np.ndarray:
+        raise NotImplementedError
+class MSELoss(Loss):
     def __call__(self, output: np.ndarray, target: np.ndarray) -> float:
         self.output = output
         self.target = target
@@ -67,11 +53,13 @@ class MSELoss:
         n = np.prod(self.target.shape)
         return -2 / n * (self.target - self.output)
 
-
 ################################
 # Layers
 ################################
-class MaxPool2D:
+class Layer:
+    def backward(self, output_gradient: np.ndarray) -> np.ndarray:
+        raise NotImplementedError
+class MaxPool2D(Layer):
     def __init__(self, kernel_size, stride=1):
         self.kernel_size = kernel_size
         self.stride = stride
@@ -160,7 +148,7 @@ class MaxPool2D:
         return input_gradient
 
 
-class Flatten:
+class Flatten(Layer):
     def __init__(
         self,
     ):
@@ -169,20 +157,21 @@ class Flatten:
     def __call__(self, input: np.ndarray) -> np.ndarray:
         # Input: [batch_numer, input_channels, height, weight]
         self.input_shape = input.shape
-        return input.reshape(self.input_shape[0], self.input_shape[1], -1)
+        new_shape = self.input_shape[:-2] + (self.input_shape[-2] * self.input_shape[-1],)
+        return input.reshape(new_shape)
 
     def backward(self, output_gradient: np.ndarray) -> np.ndarray:
         return output_gradient.reshape(self.input_shape)
 
 
-class Conv2d:
+class Conv2d(Layer):
     def __init__(self, in_channels, out_channels, kernel_size, padding=0) -> None:
         # n is the number of inputs, p is the number of outputs
         # nxn, [output_channels, input_channels, kernel, kernel]
         self.weights = he_init_cnn(
             out_channels=out_channels, in_channels=in_channels, kernel_size=kernel_size
         )
-        self.biases = np.zeros(out_channels)
+        self.bias = np.zeros(out_channels)
         self.stride = 1
         self.kernel_size = np.asarray(kernel_size)
         self.padding = padding
@@ -232,7 +221,7 @@ class Conv2d:
                     self.output[b, o] += scipy.signal.correlate2d(
                         x[b][i], self.weights[o][i], mode="valid"
                     )
-                self.output[b, o] += self.biases[o]
+                self.output[b, o] += self.bias[o]
         return self.output
 
     def backward(self, output_gradient):
@@ -265,9 +254,10 @@ class Conv2d:
             self.input_gradient = self.input_gradient[
                 :, :, self.padding : -self.padding, self.padding : -self.padding
             ]
+        self.bias_gradient = np.sum(output_gradient, axis=(0, 2, 3))
 
 
-class Linear:
+class Linear(Layer):
     def __init__(self, input_size: int, output_size: int) -> None:
         self.weights = he_init((output_size, input_size))
         self.bias = np.zeros((output_size, 1))
@@ -284,9 +274,29 @@ class Linear:
         self.weights_gradient = (
             self.input @ output_gradient
         ).T  # [output_size, input_size]
-        self.bias_gradient = np.mean(output_gradient, axis=0)
+        self.bias_gradient = np.sum(output_gradient, axis=0).reshape(self.bias.shape)
         return self.input_gradient
 
+################################
+# Optimizer
+################################
+class SGD:
+    def __init__(self, layers: List[Layer], criterion: Loss, lr=1e-3):
+        self.lr = lr
+        self.layers = layers
+        self.criterion = criterion
+
+    def backward_and_step(
+        self,
+    ):
+        output_gradient = self.criterion.backward()
+        for layer in self.layers[::-1]:
+            output_gradient = layer.backward(output_gradient=output_gradient)
+            if hasattr(layer, 'weights'):
+                layer.weights -= self.lr * layer.weights_gradient
+            #     # sum across batch, image dimensions. Because bias is applied output per channel
+                # TODO
+                layer.bias -= self.lr * layer.bias_gradient
 
 if __name__ == "__main__":
     pass
