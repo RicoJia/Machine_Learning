@@ -58,14 +58,14 @@ class ReLU:
 # Cost Functions
 ################################
 class MSELoss:
-    def __init__(self) -> None:
-        pass
+    def __call__(self, output: np.ndarray, target: np.ndarray) -> float:
+        self.output = output
+        self.target = target
+        return np.mean((target - output) ** 2, axis=None)
 
-    def __call__(self, *args, **kwds) -> np.ndarray:
-        pass
-
-    def forward(input, target) -> np.ndarray:
-        pass
+    def backward(self) -> np.ndarray:
+        n = np.prod(self.target.shape)
+        return -2 / n * (self.target - self.output)
 
 
 ################################
@@ -281,10 +281,6 @@ class Linear:
     def backward(self, output_gradient):
         # output_gradient = [batch_size, output_size], dj/dz.
         self.input_gradient = output_gradient @ self.weights
-        # TODO Remember to remove
-        print(
-            f"output_gradient: {output_gradient.shape}, self.input: {self.input.shape}"
-        )
         self.weights_gradient = (
             self.input @ output_gradient
         ).T  # [output_size, input_size]
