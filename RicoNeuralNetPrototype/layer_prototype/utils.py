@@ -13,6 +13,7 @@ def mnist_preprocess(x, y):
     y = to_categorical(y, 10)  # One-hot encode labels
     return x, y
 
+
 def load_mnist():
     X_TRAIN_FILE, X_TEST_FILE, Y_TRAIN_FILE, Y_TEST_FILE = (
         "x_train.npy",
@@ -49,7 +50,12 @@ def load_mnist():
     x_test, y_test = mnist_preprocess(x_test, y_test)
     return x_train, y_train, x_test, y_test
 
-def create_mini_batches(x, y, batch_size: int):
+
+def create_mini_batches(
+    x,
+    y,
+    batch_size: int,
+):
     total_batch_size = x.shape[0]
     random_sequnce = np.random.permutation(total_batch_size)
     x_shuffled = x[random_sequnce]

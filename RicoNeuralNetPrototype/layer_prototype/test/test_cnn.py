@@ -1,9 +1,14 @@
 import numpy as np
 import torch
 
-from RicoNeuralNetPrototype.layer_prototype.cnn import (SGD, Conv2d, Flatten,
-                                                        MaxPool2D, MSELoss,
-                                                        ReLU)
+from RicoNeuralNetPrototype.layer_prototype.cnn import (
+    SGD,
+    Conv2d,
+    Flatten,
+    MaxPool2D,
+    MSELoss,
+    ReLU,
+)
 
 a = np.array(
     [
@@ -55,6 +60,9 @@ class TestsRicoNNUnits:
         dl_dout_flatten = torch.from_numpy(dl_dout).reshape(N, -1)
         output_tensor.backward(dl_dout_flatten)
         assert np.allclose(output_tensor.detach().numpy(), output)
+        print(
+            f"output shape: {output.shape}, output_tensor shape: {output_tensor.shape}"
+        )
         assert np.allclose(input_tensor.grad.detach().numpy(), input_gradient)
 
     def test_max_pooling_flattening(self):
@@ -127,9 +135,9 @@ def backward_prop_test(conv, torch_conv, input_tensor, torch_output):
 def optimize_test(conv, torch_conv):
     assert np.allclose(conv.weights, torch_conv.weight.detach().numpy())
     assert np.allclose(conv.bias, torch_conv.bias.detach().numpy())
-
-    rico_optimizer = SGD(layers=[conv], lr=0.1)
-    rico_optimizer.step()  # Update the weights
+    criterion = MSELoss()
+    rico_optimizer = SGD(layers=[conv], lr=0.1, criterion=criterion)
+    rico_optimizer.backward_and_step(turn_on_backward=False)  # Update the weights
 
     optimizer = torch.optim.SGD(torch_conv.parameters(), lr=0.1)
     optimizer.step()  # Update the weights

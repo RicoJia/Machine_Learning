@@ -43,6 +43,8 @@ class ReLU:
 class Loss:
     def backward(self) -> np.ndarray:
         raise NotImplementedError
+
+
 class MSELoss(Loss):
     def __call__(self, output: np.ndarray, target: np.ndarray) -> float:
         self.output = output
@@ -53,12 +55,15 @@ class MSELoss(Loss):
         n = np.prod(self.target.shape)
         return -2 / n * (self.target - self.output)
 
+
 ################################
 # Layers
 ################################
 class Layer:
     def backward(self, output_gradient: np.ndarray) -> np.ndarray:
         raise NotImplementedError
+
+
 class MaxPool2D(Layer):
     def __init__(self, kernel_size, stride=1):
         self.kernel_size = kernel_size
@@ -149,15 +154,11 @@ class MaxPool2D(Layer):
 
 
 class Flatten(Layer):
-    def __init__(
-        self,
-    ):
-        pass
-
     def __call__(self, input: np.ndarray) -> np.ndarray:
         # Input: [batch_numer, input_channels, height, weight]
         self.input_shape = input.shape
-        new_shape = self.input_shape[:-2] + (self.input_shape[-2] * self.input_shape[-1],)
+        # The output will be a 2D [batch_number, number_of_elements]
+        new_shape = self.input_shape[:1] + (np.prod(self.input_shape[1:]),)
         return input.reshape(new_shape)
 
     def backward(self, output_gradient: np.ndarray) -> np.ndarray:
@@ -201,6 +202,8 @@ class Conv2d(Layer):
             self.weights.shape[1],
         )
         batch_num = x.shape[0]
+        if x.ndim == 3:
+            x = x.reshape(x.shape[0], 1, x.shape[1], x.shape[2])
         input_image_size = np.asarray((x.shape[2], x.shape[3]))
         output_size = (
             (input_image_size + self.padding * 2 - self.kernel_size) / self.stride + 1
@@ -255,6 +258,7 @@ class Conv2d(Layer):
                 :, :, self.padding : -self.padding, self.padding : -self.padding
             ]
         self.bias_gradient = np.sum(output_gradient, axis=(0, 2, 3))
+        return self.input_gradient
 
 
 class Linear(Layer):
@@ -277,6 +281,7 @@ class Linear(Layer):
         self.bias_gradient = np.sum(output_gradient, axis=0).reshape(self.bias.shape)
         return self.input_gradient
 
+
 ################################
 # Optimizer
 ################################
@@ -286,17 +291,18 @@ class SGD:
         self.layers = layers
         self.criterion = criterion
 
-    def backward_and_step(
-        self,
-    ):
-        output_gradient = self.criterion.backward()
+    def backward_and_step(self, turn_on_backward=True):
+        if turn_on_backward:
+            output_gradient = self.criterion.backward()
         for layer in self.layers[::-1]:
-            output_gradient = layer.backward(output_gradient=output_gradient)
-            if hasattr(layer, 'weights'):
+            if turn_on_backward:
+                output_gradient = layer.backward(output_gradient=output_gradient)
+            if hasattr(layer, "weights"):
                 layer.weights -= self.lr * layer.weights_gradient
-            #     # sum across batch, image dimensions. Because bias is applied output per channel
+                #     # sum across batch, image dimensions. Because bias is applied output per channel
                 # TODO
                 layer.bias -= self.lr * layer.bias_gradient
+
 
 if __name__ == "__main__":
     pass
