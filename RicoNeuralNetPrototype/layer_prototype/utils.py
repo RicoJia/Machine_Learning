@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import torch
 
 
 def mnist_preprocess(x, y):
@@ -51,11 +52,10 @@ def load_mnist():
     return x_train, y_train, x_test, y_test
 
 
-def create_mini_batches(
-    x,
-    y,
-    batch_size: int,
-):
+def create_mini_batches(x, y, batch_size: int, for_torch: bool = False):
+    if for_torch:
+        x = torch.tensor(x, dtype=torch.float32)
+        y = torch.tensor(y, dtype=torch.float32)
     total_batch_size = x.shape[0]
     random_sequnce = np.random.permutation(total_batch_size)
     x_shuffled = x[random_sequnce]

@@ -64,6 +64,11 @@ class Layer:
         raise NotImplementedError
 
 
+class RicoCalculationLayer(Layer):
+    # TODO: force weights
+    pass
+
+
 class MaxPool2D(Layer):
     def __init__(self, kernel_size, stride=1):
         self.kernel_size = kernel_size
@@ -165,7 +170,7 @@ class Flatten(Layer):
         return output_gradient.reshape(self.input_shape)
 
 
-class Conv2d(Layer):
+class Conv2d(RicoCalculationLayer):
     def __init__(self, in_channels, out_channels, kernel_size, padding=0) -> None:
         # n is the number of inputs, p is the number of outputs
         # nxn, [output_channels, input_channels, kernel, kernel]
@@ -261,7 +266,7 @@ class Conv2d(Layer):
         return self.input_gradient
 
 
-class Linear(Layer):
+class Linear(RicoCalculationLayer):
     def __init__(self, input_size: int, output_size: int) -> None:
         self.weights = he_init((output_size, input_size))
         self.bias = np.zeros((output_size, 1))
@@ -297,7 +302,8 @@ class SGD:
         for layer in self.layers[::-1]:
             if turn_on_backward:
                 output_gradient = layer.backward(output_gradient=output_gradient)
-            if hasattr(layer, "weights"):
+            if isinstance(layer, RicoCalculationLayer):
+                # if hasattr(layer, "weights"):
                 layer.weights -= self.lr * layer.weights_gradient
                 #     # sum across batch, image dimensions. Because bias is applied output per channel
                 # TODO

@@ -27,10 +27,19 @@ def test_dense():
 
     l = torch.nn.Linear(input_dim, output_dim)
     l.weight = torch.nn.Parameter(torch.from_numpy(rico_l.weights.copy()).float())
+    l.bias = torch.nn.Parameter(torch.from_numpy(rico_l.bias.copy()).float())
     input_tensor, output_tensor = torch_forward_backward_test(a=a, l=l, dj_dout=dj_dout)
 
     assert np.allclose(input_tensor.grad.detach().numpy(), input_gradient)
     assert np.allclose(l.weight.grad.detach().numpy(), rico_l.weights_gradient)
+
+    # TODO Remember to remove
+    print(f"output_tensor.detach().numpy(): {output_tensor.detach().numpy()}")
+    print(f"output: {output}")
+    # TODO Remember to remove
+    print(f"bias shape: {l.bias.shape}")
+
+    # assert np.allclose(output_tensor.detach().numpy(), output)
 
 
 def test_mse():
