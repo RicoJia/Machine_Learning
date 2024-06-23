@@ -8,14 +8,14 @@ import scipy.signal
 
 def he_init_cnn(out_channels, in_channels, kernel_size):
     # For ReLU, this is for [output_channels, input_channels, kernel, kernel]
-    return np.random.randn(out_channels, in_channels, *kernel_size) * np.sqrt(
+    return (np.random.randn(out_channels, in_channels, *kernel_size) * np.sqrt(
         2 / in_channels
-    )
+    )).astype(np.float32)
 
 
 def he_init(shape):
     # For ReLU
-    return np.random.randn(*shape) * np.sqrt(2 / shape[0])
+    return (np.random.randn(*shape) * np.sqrt(2 / shape[0])).astype(np.float32)
 
 
 ################################
@@ -177,9 +177,9 @@ class Conv2d(RicoCalculationLayer):
         self.weights = he_init_cnn(
             out_channels=out_channels, in_channels=in_channels, kernel_size=kernel_size
         )
-        self.bias = np.zeros(out_channels)
+        self.bias = np.zeros(out_channels, dtype=np.float32)
         self.stride = 1
-        self.kernel_size = np.asarray(kernel_size)
+        self.kernel_size = np.asarray(kernel_size, dtype=np.float32)
         self.padding = padding
 
     def pad_input(self, x):
@@ -209,26 +209,27 @@ class Conv2d(RicoCalculationLayer):
         batch_num = x.shape[0]
         if x.ndim == 3:
             x = x.reshape(x.shape[0], 1, x.shape[1], x.shape[2])
-        input_image_size = np.asarray((x.shape[2], x.shape[3]))
+        input_image_size = np.asarray((x.shape[2], x.shape[3]), dtype=np.float32)
         output_size = (
             (input_image_size + self.padding * 2 - self.kernel_size) / self.stride + 1
         ).astype(int)
         self.output = np.zeros(
-            [batch_num, out_channel_num, output_size[0], output_size[1]]
+            [batch_num, out_channel_num, output_size[0], output_size[1]],
+            dtype=np.float32
         )
 
         if x.shape[1] != input_channel_num:
             raise ValueError(
                 f"Number of input channel must be {input_channel_num}, but now it is {x.shape[1]}"
             )
-        x = self.pad_input(x)
+        x = self.pad_input(x).astype(np.float32)
         self.input = x
         for b in range(batch_num):
             for o in range(out_channel_num):
                 for i in range(input_channel_num):
                     self.output[b, o] += scipy.signal.correlate2d(
                         x[b][i], self.weights[o][i], mode="valid"
-                    )
+                    ).astype(np.float32)
                 self.output[b, o] += self.bias[o]
         return self.output
 
@@ -241,10 +242,10 @@ class Conv2d(RicoCalculationLayer):
             self.weights.shape[0],
             self.weights.shape[1],
         )
-        self.output_gradient = output_gradient
-        self.input_gradient = np.zeros(self.input.shape)
+        self.output_gradient = output_gradient.astype(np.float32)
+        self.input_gradient = np.zeros(self.input.shape, dtype=np.float32)
         # in this case, weights is kernel
-        self.weights_gradient = np.zeros(self.weights.shape)  # delJ/delK
+        self.weights_gradient = np.zeros(self.weights.shape, dtype=np.float32)  # delJ/delK
 
         batch_num = self.input.shape[0]
         for b in range(batch_num):
@@ -252,34 +253,34 @@ class Conv2d(RicoCalculationLayer):
                 for i in range(input_channel_num):
                     self.weights_gradient[o, i] = scipy.signal.correlate2d(
                         self.input[b, i], output_gradient[b, o], mode="valid"
-                    )
-                    self.input_gradient[i] += scipy.signal.convolve2d(
+                    ).astype(np.float32)
+                    self.input_gradient[b, i] += scipy.signal.convolve2d(
                         output_gradient[b, o], self.weights[o][i], mode="full"
-                    )
+                    ).astype(np.float32)
 
         if self.padding > 0:
             # Just keep the unpadded portion, which is consistent with pytorch
             self.input_gradient = self.input_gradient[
                 :, :, self.padding : -self.padding, self.padding : -self.padding
             ]
-        self.bias_gradient = np.sum(output_gradient, axis=(0, 2, 3))
+        self.bias_gradient = np.sum(output_gradient, axis=(0, 2, 3)).astype(np.float32)
         return self.input_gradient
 
 
 class Linear(RicoCalculationLayer):
     def __init__(self, input_size: int, output_size: int) -> None:
         self.weights = he_init((output_size, input_size))
-        self.bias = np.zeros((output_size, 1))
+        self.bias = np.zeros((output_size, 1), dtype=np.float32)
 
     def __call__(self, x):
         # x: [batch, input_size]
-        self.input = np.asarray(x).T  # [input_size, batch_size]
+        self.input = np.asarray(x, dtype=np.float32).T  # [input_size, batch_size]
         self.z = self.weights @ self.input + self.bias  # [output_size, batch_size]
         return self.z.T
 
     def backward(self, output_gradient):
         # output_gradient = [batch_size, output_size], dj/dz.
-        self.input_gradient = output_gradient @ self.weights
+        self.input_gradient = output_gradient.astype(np.float32) @ self.weights
         self.weights_gradient = (
             self.input @ output_gradient
         ).T  # [output_size, input_size]

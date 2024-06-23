@@ -18,8 +18,8 @@ from RicoNeuralNetPrototype.layer_prototype.utils import create_mini_batches, lo
 
 DENSE_IO_DIMS = [(28 * 28, 128), (128, 64), (64, 10)]
 # CNN_IO_DIMS = [(28*28,128), (128, 64), (64,10)]
-LR = 0.01
-EPOCH_NUM = 9
+LR = 0.002
+EPOCH_NUM = 5
 WEIGHTS_FILE = "rico_nn_weights.npz"
 
 
@@ -196,36 +196,37 @@ def test_torch(x_train, y_train, x_test, y_test, model, model_name: str):
         print(f"accuracy: {accuracy}")
 
 
-def test_rico_NN(x_train, y_train, x_test, y_test, model: RicoNNBase):
+def test_rico_NN_on_validation_data(x_test, model, y_test):
+    print("Testing Rico NN")
+    output = model(x_test)
+    predicted = np.argmax(output, axis=1)
+    labels = np.argmax(y_test, axis=1)
+
+    total = labels.shape[0]
+    correct = np.sum(predicted == labels)
+
+    accuracy = correct / total
+    print(f"accuracy: {accuracy}")
+
+def test_rico_NN(
+    x_train, y_train, x_test, y_test, model: RicoNNBase
+):
     model.load_model()
     criterion = MSELoss()
     optimizer = SGD(layers=model.layers, criterion=criterion, lr=LR)
+
     for epoch in range(EPOCH_NUM):
-        t1 = time.time()
-        # TODO Remember to remove
-        print(f"Epoch {epoch}")
-        batches = create_mini_batches(x_train, y_train, batch_size=60, for_torch=False)
+        batches = create_mini_batches(x_train, y_train, batch_size=60, for_torch=True)
         for i, (input, target) in enumerate(batches):
-            output = model(input)  # Forward pass
-            loss = criterion(output, target)
-            optimizer.backward_and_step()
-            print(f"Batch: {i}; Loss: {loss}")
-        t2 = time.time()
-
-        model.save_model()
-        print(f"Rico: testing")
-        output = model(x_test)
-        predicted = np.argmax(output, axis=1)
-        labels = np.argmax(y_test, axis=1)
-
-        total = labels.shape[0]
-        correct = np.sum(predicted == labels)
-
-        accuracy = correct / total
-        print(f"accuracy: {accuracy}")
-        t3 = time.time()
-        # TODO Remember to remove
-        print(f"Totol time: {t3-t1}, training time; {t2-t1}")
+            one_step_rico(
+                input.detach().numpy(),
+                model,
+                criterion,
+                optimizer,
+                target.detach().numpy(),
+            )
+            model.save_model()
+    test_rico_NN_on_validation_data(model=model, x_test=x_test, y_test=y_test)
 
 
 ################################################################
@@ -237,6 +238,7 @@ def one_step_rico(input, model, criterion, optimizer, target):
     output = model(input)  # Forward pass
     loss = criterion(output, target)
     optimizer.backward_and_step()
+    # model.save_model()
     # TODO Remember to remove
     print(f"Rico Loss: {loss}")
 
@@ -340,11 +342,7 @@ def test_rico_NN_against_torch(
 """
 REPORT
 1. loss trend (torch): In first 10 batches, 0.1076, then over 30 batches, steadily down to 0.08
-2. Our model should have the same weights array dims as the torch model.
-    torch shape before 1st pool: torch.Size([60, 32, 28, 28])
-    torch shape after 1st pool: torch.Size([60, 32, 14, 14])
-    torch shape before 2nd pool: torch.Size([60, 64, 14, 14])
-    torch shape after 2nd pool: torch.Size([60, 64, 7, 7])
+2. This implementation achieves 86% accuracy after 9 epochs of training (5h of training), while torch achieves 96%, with a training time 4 min 
 """
 
 if __name__ == "__main__":
@@ -352,8 +350,8 @@ if __name__ == "__main__":
     # test_torch( x_train, y_train, x_test, y_test, model = TorchDenseNN())
     # test_torch( x_train, y_train, x_test, y_test, model = TorchCNN(), model_name="torch_cnn")
     # test_rico_NN(x_train, y_train, x_test, y_test, RicoDenseNN())
-    # test_rico_NN(x_train, y_train, x_test, y_test, RicoCNN())
+    test_rico_NN(x_train, y_train, x_test, y_test, RicoCNN())
 
-    test_rico_NN_against_torch(
-        x_train, y_train, x_test, y_test, model=RicoCNN(), torch_model=TorchCNN()
-    )
+    # test_rico_NN_against_torch(
+    #     x_train, y_train, x_test, y_test, model=RicoCNN(), torch_model=TorchCNN()
+    # )

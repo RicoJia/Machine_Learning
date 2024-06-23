@@ -2,7 +2,7 @@
 
 import numpy as np
 import torch
-
+import pkg_resources
 
 def mnist_preprocess(x, y):
     from keras.utils import to_categorical
@@ -16,39 +16,40 @@ def mnist_preprocess(x, y):
 
 
 def load_mnist():
+    package_name = 'RicoNeuralNetPrototype'
     X_TRAIN_FILE, X_TEST_FILE, Y_TRAIN_FILE, Y_TEST_FILE = (
-        "x_train.npy",
-        "x_test.npy",
-        "y_train.npy",
-        "y_test.npy",
+        pkg_resources.resource_filename(package_name,"layer_prototype/data/x_train.npy"),
+        pkg_resources.resource_filename(package_name,"layer_prototype/data/x_test.npy"),
+        pkg_resources.resource_filename(package_name,"layer_prototype/data/y_train.npy"),
+        pkg_resources.resource_filename(package_name,"layer_prototype/data/y_test.npy"),
     )
     try:
-        x_train = np.load("data/x_train.npy")
-        y_train = np.load("data/y_train.npy")
-        x_test = np.load("data/x_test.npy")
-        y_test = np.load("data/y_test.npy")
+        x_train = np.load(X_TRAIN_FILE)
+        y_train = np.load(Y_TRAIN_FILE)
+        x_test = np.load(X_TEST_FILE)
+        y_test = np.load(Y_TEST_FILE)
     except FileNotFoundError:
-        print(f"Downloading mnist")
+        print(f"Didn't find local mnist data, Downloading")
         import tensorflow as tf
 
         mnist = tf.keras.datasets.mnist
         (x_train, y_train), (x_test, y_test) = mnist.load_data()
+        x_train, y_train = mnist_preprocess(x_train, y_train)
+        x_test, y_test = mnist_preprocess(x_test, y_test)
         np.save("data/x_train.npy", x_train)
         np.save("data/y_train.npy", y_train)
         np.save("data/x_test.npy", x_test)
         np.save("data/y_test.npy", y_test)
         print(
-            f"Saved mnist data to {X_TEST_FILE, Y_TEST_FILE, X_TRAIN_FILE, Y_TRAIN_FILE}"
+            f"Saved mnist data to /data"
         )
     else:
         print(
-            f"Loaded mnist data from {X_TEST_FILE, Y_TEST_FILE, X_TRAIN_FILE, Y_TRAIN_FILE}"
+            f"Loaded mnist data from RicoNeuralNetPrototype/layer_prototype/data"
         )
     # training set: (60000, 28, 28), (60000, )
     # test set: (10000, 28, 28), (10000, )
 
-    x_train, y_train = mnist_preprocess(x_train, y_train)
-    x_test, y_test = mnist_preprocess(x_test, y_test)
     return x_train, y_train, x_test, y_test
 
 
