@@ -14,6 +14,7 @@ How PyTorch Works: AutoGrad. AutoGrad generates a computation graph for a networ
     So, the computation graph records inputs, outputs at each layer, and the operation done.
     loss.backward() does this, and stores gradients in tensor.grad for the ones with (requires_grad=True)
 """
+
 import torch
 import torch.nn as nn
 import torch.optim as optim

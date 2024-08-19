@@ -279,14 +279,13 @@ class Linear(RicoCalculationLayer):
         return self.z.T
 
     def backward(self, output_gradient):
-        # output_gradient = [batch_size, output_size], dj/dz.
+        # output_gradient dj/dz = [batch_size, output_size]. Activation layer is solo, so we have dj/dz here.
         self.input_gradient = output_gradient.astype(np.float32) @ self.weights
         self.weights_gradient = (
             self.input @ output_gradient
-        ).T  # [output_size, input_size]
+        ).T  # [output_size, input_size], after summing up all batches
         self.bias_gradient = np.sum(output_gradient, axis=0).reshape(self.bias.shape)
         return self.input_gradient
-
 
 ################################
 # Optimizer
@@ -306,8 +305,7 @@ class SGD:
             if isinstance(layer, RicoCalculationLayer):
                 # if hasattr(layer, "weights"):
                 layer.weights -= self.lr * layer.weights_gradient
-                #     # sum across batch, image dimensions. Because bias is applied output per channel
-                # TODO
+                # sum across batch, image dimensions. Because bias is applied output per channel
                 layer.bias -= self.lr * layer.bias_gradient
 
 

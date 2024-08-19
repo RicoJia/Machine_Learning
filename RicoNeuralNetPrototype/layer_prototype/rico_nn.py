@@ -1,3 +1,4 @@
+#!/usr/bin/env python3 
 import os
 import time
 
@@ -106,6 +107,7 @@ class TorchDenseNN(torch.nn.Module):
 
 class RicoCNN(RicoNNBase):
     def __init__(self) -> None:
+        # 21600 param
         self.layers = [
             Conv2d(in_channels=1, out_channels=32, kernel_size=(3, 3)),
             ReLU(),
