@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 
-import numpy as np
+from typing import List, Tuple
+
 import matplotlib.pyplot as plt
-from typing import Tuple, List
+import numpy as np
+import torch
 from sklearn.datasets import make_blobs, make_circles
+
+
+def generate_xor_data(n_points):
+    X = np.random.randint(0, 2, (n_points, 2))
+    y = np.logical_xor(X[:, 0], X[:, 1]).astype(np.float32)
+    y = np.reshape(y, (-1, 1))
+    # Add some noise
+    X = (X + np.random.normal(0, 0.1, X.shape)).astype(np.float32)
+    return X,y
 
 def generate_spiral_data(n_points, classes):
     X = np.zeros((n_points*classes, 2))
@@ -34,9 +45,9 @@ def generate_circles_within_circles(n_points, classes):
 
 def partition_data(X: np.ndarray, y: np.ndarray, 
                    training_set=0.7, 
-                   holdout_set = 0.2, test_set=0.1) \
+                   test_set = 0.2, validation_set=0.1) \
     -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        if not np.allclose(training_set+holdout_set+test_set, 1.0):
+        if not np.allclose(training_set+test_set+validation_set, 1.0):
             raise ValueError("The sum of data split proportions must be close to 1.0")
         if len(X) != len(y):
             raise ValueError("X length and y length should be the same")
@@ -48,17 +59,38 @@ def partition_data(X: np.ndarray, y: np.ndarray,
         # Split the data
         total = len(X)
         n_training_set = int(total * training_set)
-        n_holdout_set = int(total * holdout_set)
+        n_test_set = int(total * test_set)
 
         X_train = X[indices[:n_training_set]]
         Y_train = y[indices[:n_training_set]]
-        X_holdout = X[indices[n_training_set: n_training_set + n_holdout_set]]
-        y_holdout = y[indices[n_training_set: n_training_set + n_holdout_set]]
-        X_test = X[indices[n_training_set + n_holdout_set:]]
-        y_test = y[indices[n_training_set + n_holdout_set:]]
-        return X_train, Y_train, X_holdout, y_holdout, X_test, y_test
+        X_test = X[indices[n_training_set: n_training_set + n_test_set]]
+        y_test = y[indices[n_training_set: n_training_set + n_test_set]]
+        X_validation = X[indices[n_training_set + n_test_set:]]
+        y_validation = y[indices[n_training_set + n_test_set:]]
+        return X_train, Y_train, X_test, y_test, X_validation, y_validation
     
+def to_tensor(*nd_arrays):
+    return_ls = []
+    for arr in nd_arrays:
+        return_ls.append(torch.from_numpy(arr))
+    return tuple(return_ls)
+    
+def create_mini_batches(x, y, batch_size: int, for_torch: bool = False):
+    if for_torch:
+        x = torch.tensor(x, dtype=torch.float32)
+        y = torch.tensor(y, dtype=torch.float32)
+    total_batch_size = x.shape[0]
+    random_sequnce = np.random.permutation(total_batch_size)
+    x_shuffled = x[random_sequnce]
+    y_shuffled = y[random_sequnce]
+    mini_batches = [
+        (x_shuffled[i : i + batch_size], y_shuffled[i : i + batch_size])
+        for i in range(0, total_batch_size, batch_size)
+    ]
+    return mini_batches
+
 def visualize_2D_data(X,y,title, skip_visualize: bool = False):
+    plt.close()     # to prevent from the previous images to open again
     plt.figure(figsize=(8, 8))
     plt.scatter(X[:, 0], X[:, 1], c=y, cmap='viridis', s=50, alpha=0.8)
     plt.title(title)
