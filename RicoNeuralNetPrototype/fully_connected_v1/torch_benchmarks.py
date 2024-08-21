@@ -12,6 +12,10 @@ from RicoNeuralNetPrototype.utils.input_data import (
 
 
 def test_with_model(X_train, y_train, X_test, y_test, X_validation=None, y_validation=None):
+    """
+    Create a model, train it, and validate its performance. 
+    All inputs are expected to be in Torch tensors.
+    """
     model = SimpleNN(
         fcn_layers=[
             nn.Linear(2, 4), 
@@ -42,7 +46,6 @@ def test_with_model(X_train, y_train, X_test, y_test, X_validation=None, y_valid
             with torch.no_grad():
                 output = model(X_validation)
                 loss = loss_func(output, y_validation)  # Compute the loss
-                #TODO Remember to remove
                 print(f'Validation Loss: {loss}')
 
     debugger.plot_summary()
