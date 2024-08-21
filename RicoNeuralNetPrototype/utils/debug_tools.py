@@ -144,6 +144,7 @@ class FCNDebugger:
 
     def _plot_accuracy(self):
         # Runs validation set in the model, then calculate accuracy
+        # TODO: COULD BE A BUG HERE 
         y_test_labels = np.argmax(self._y_test, axis=-1)
         y_hat = (
             self._predict_func(X=torch.from_numpy(self._X_test), use_argmax=True)
@@ -153,7 +154,6 @@ class FCNDebugger:
         accuracy = np.sum(np.isclose(y_test_labels, y_hat)) / float(len(y_hat))
 
         fig = go.Figure()
-        # fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines"))  # Example line
         fig.add_annotation(
             text=f"{accuracy*100}%",
             x=0.5,  # X coordinate
