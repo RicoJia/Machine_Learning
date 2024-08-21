@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
+
+"""
+In this file, we have a collection of utils for visualizations:
+- Demo Cost function visualization
+"""
 import matplotlib.pyplot as plt
 import numpy as np
 
+########################################################
+# Demo Cost function visualization
+########################################################
 
 def relu(z, derivative=False):
     if derivative:
@@ -22,10 +30,6 @@ def sigmoid(z, derivative=False):
         return s * (1 - s)
     return 1 / (1 + np.exp(-z))
 
-
-########################################################
-# Plotting Functions
-########################################################
 def plot_func(func):
     x = np.linspace(-5, 5, 100)
     y = func(x)

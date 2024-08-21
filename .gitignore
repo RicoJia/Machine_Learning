@@ -2,3 +2,10 @@ __pycache__/
 build/
 *.egg-info/
 *npy
+
+.bash_history
+.cache/
+.local/
+.python_history
+.ros/
+.viminfo
