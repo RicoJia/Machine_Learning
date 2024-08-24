@@ -43,7 +43,9 @@ def test_with_model(
     )
 
     loss_func = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.02, momentum=0.9)
+    # optimizer = optim.SGD(model.parameters(), lr=0.02)
+    optimizer = optim.Adam(model.parameters(), lr=0.02)
+
     debugger = FCN2DDebugger(
         model=model,
         config=FCNDebuggerConfig(),
@@ -51,7 +53,7 @@ def test_with_model(
         y_test=y_test,
         predict_func=functools.partial(predict, model=model),
     )
-    epochs = 500
+    epochs = 2000
     for epoch in range(epochs):
         mini_batches = create_mini_batches(X_train, y_train, batch_size=64)
         for X_train_mini_batch, y_train_mini_batch in mini_batches:
@@ -72,8 +74,8 @@ def test_with_model(
 
 if __name__ == "__main__":
     # X, y = generate_xor_data(n_points=200)
-    # X, y = generate_spiral_data(n_points=200, classes=5)
-    X, y = generate_gaussian_mixtures(1000, classes=5)
+    X, y = generate_spiral_data(n_points=1000, classes=5)
+    # X, y = generate_gaussian_mixtures(1000, classes=5)
     # X, y = generate_circles_within_circles(n_points=200, classes=3)
 
     y = to_one_hot(y)
@@ -81,6 +83,3 @@ if __name__ == "__main__":
         *partition_data(X=X, y=y)
     )
     test_with_model(X_train, y_train, X_test, y_test, X_validation, y_validation)
-
-    # Testing the neural network
-    print("Testing on test data:")
