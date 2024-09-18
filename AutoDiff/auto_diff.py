@@ -37,8 +37,6 @@ class Tensor:
         Don't forget that we need to accumulate gradients until zero_grad is called
         """
         pass
-        # if self._required_grad:
-        #     self._grad = np.ones_like(self._grad)
 
     def _binary_forward_operation(self, other, binary_op: Callable):
         """Forward operation that needs to be called for binary operations
@@ -225,7 +223,6 @@ if __name__ == "__main__":
 
     def test_y_squared_minus_first_order(w1_val, k, expected_grad):
         w1 = Tensor(np.array([[w1_val]]), required_grad=True)
-
         w2 = w1 @ 2 + 3
         w3 = w2 @ 3
         # 1 -> 2 -> 5 -> 15
