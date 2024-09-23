@@ -12,3 +12,4 @@ build/
 
 .jupyter/
 .ipython/
+models/data/
