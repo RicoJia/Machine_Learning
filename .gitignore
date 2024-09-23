@@ -9,3 +9,6 @@ build/
 .python_history
 .ros/
 .viminfo
+
+.jupyter/
+.ipython/

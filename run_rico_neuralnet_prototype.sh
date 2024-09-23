@@ -39,6 +39,9 @@ docker run \
     -v /dev/bus/usb:/dev/bus/usb \
     -v $XAUTH:$XAUTH \
     -v /dev:/dev:rw \
+    -p 8888:8888 \
     -it --rm \
     --privileged \
-    ${IMAGE_NAME}
+    ${IMAGE_NAME} \
+    jupyter notebook --ip=0.0.0.0 --no-browser --allow-root
+

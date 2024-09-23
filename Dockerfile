@@ -69,40 +69,44 @@ RUN python3 -m pip install -U \
         torchvision 
 
 RUN python3 -m pip install -U tensorflow
-        
-# Setup ROS2 Foxy
-RUN locale-gen en_US en_US.UTF-8
-RUN update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-ENV LANG=en_US.UTF-8
+RUN python3 -m pip install -U \
+        matplotlib \
+        pillow
+RUN pip install -U jupyter notebook 
 
-RUN curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add -
-RUN sh -c 'echo "deb [arch=$(dpkg --print-architecture)] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2-latest.list'      
+# # Setup ROS2 Foxy
+# RUN locale-gen en_US en_US.UTF-8
+# RUN update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+# ENV LANG=en_US.UTF-8
 
-RUN apt-get update && apt-get install -y \
-        python3-colcon-common-extensions \
-        python3-rosdep \
-        python3-vcstool \
-        ros-foxy-camera-calibration-parsers \
-        ros-foxy-camera-info-manager \
-        ros-foxy-desktop \
-        ros-foxy-launch-testing-ament-cmake \
-        ros-foxy-rqt* \
-        ros-foxy-v4l2-camera \
-        ros-foxy-vision-msgs \
-        ros-foxy-pcl-conversions \
-        ros-foxy-sensor-msgs-py \
-        ros-foxy-stereo-image-proc \
-        ros-foxy-pcl-ros \
-        ros-foxy-usb-cam \
-        && rm -rf /var/lib/apt/lists/*
+# RUN curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add -
+# RUN sh -c 'echo "deb [arch=$(dpkg --print-architecture)] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2-latest.list'      
 
-RUN apt-get update && apt-get install -y \
-	&& apt install ros-foxy-rmw-cyclonedds-cpp -y \
-        && rm -rf /var/lib/apt/lists/*
+# RUN apt-get update && apt-get install -y \
+#         python3-colcon-common-extensions \
+#         python3-rosdep \
+#         python3-vcstool \
+#         ros-foxy-camera-calibration-parsers \
+#         ros-foxy-camera-info-manager \
+#         ros-foxy-desktop \
+#         ros-foxy-launch-testing-ament-cmake \
+#         ros-foxy-rqt* \
+#         ros-foxy-v4l2-camera \
+#         ros-foxy-vision-msgs \
+#         ros-foxy-pcl-conversions \
+#         ros-foxy-sensor-msgs-py \
+#         ros-foxy-stereo-image-proc \
+#         ros-foxy-pcl-ros \
+#         ros-foxy-usb-cam \
+#         && rm -rf /var/lib/apt/lists/*
 
-RUN rosdep init
+# RUN apt-get update && apt-get install -y \
+# 	&& apt install ros-foxy-rmw-cyclonedds-cpp -y \
+#         && rm -rf /var/lib/apt/lists/*
 
-RUN rosdep update
+# RUN rosdep init
+
+# RUN rosdep update
 
 # Create a user to match the host's UID/GID and create necessary directories
 # Ros needs to access /home/${USER_NAME}/.ros/ So we need to set up the permission properly there. 
@@ -127,5 +131,8 @@ ENV USER_NAME=${USER_NAME}
 # Switch to user
 USER ${USER_NAME}
 WORKDIR /home/${USER_NAME}
+
+# jupyter notebook port
+EXPOSE 8888
 
 CMD ["bash"]
