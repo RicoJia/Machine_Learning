@@ -20,7 +20,9 @@ ls -FAlh $XAUTH
 echo ""
 echo "Running docker..."
 
-IMAGE_NAME=ros2-image-processing-rico
+# IMAGE_NAME=ros2-image-processing-rico
+IMAGE_NAME=rico_cuda_image
+TAG_NAME=r36.3.0-cu122-torchvision
 THIS_DIRECTORY_PATH="$(dirname "${BASH_SOURCE[0]}")"
 THIS_DIRECTORY_NAME="$(basename "$(dirname "${BASH_SOURCE[0]}")")"
 # Add this for nvidia 
@@ -41,7 +43,10 @@ docker run \
     -v /dev:/dev:rw \
     -p 8888:8888 \
     -it --rm \
+    --runtime nvidia \
+    --network=host \
     --privileged \
-    ${IMAGE_NAME} \
+    ${IMAGE_NAME}:${TAG_NAME} \
     jupyter notebook --ip=0.0.0.0 --no-browser --allow-root
 
+ #docker run --runtime nvidia -it --rm --network=host -v /home/rico:/home/rico rico_cuda_image:r36.3.0-cu122-torchvision
