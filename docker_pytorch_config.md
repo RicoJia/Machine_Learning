@@ -12,6 +12,10 @@
 
 - During training, accuracy was 70%, but in eval mode, the same dataset gives 17%??
 
+- TODO:
+    1. download some more pictures
+    2. Transfer Learning with Resnet 101, and CIFAR-100?
+
 ## Questions
 
 - Data transformation: apply the same trasformation to test and train dataset?? TODO
@@ -28,4 +32,8 @@
 - How to monitor jetson GPU usage? Jtop
 - Mixed precision training?? TODO
 
-- Learning Rate = 0.01 is quite high for Adam
+- Learning Rate = 0.01 is quite high for Adam, 0.1 is good for `SGD`
+
+- `class_names = train_data.classes`
+
+
