@@ -1,3 +1,5 @@
+# jetson-containers build --name=rico_cuda_image jupyterlab pytorch
+
 echo "Preparing Xauthority data..."
 xauth_list=$(xauth nlist :0 | tail -n 1 | sed -e 's/^..../ffff/')
 if [ ! -f $XAUTH ]; then
