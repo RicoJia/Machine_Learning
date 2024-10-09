@@ -6,14 +6,15 @@ from torchvision.transforms import v2, CenterCrop
 import matplotlib.pyplot as plt
 from torchvision.transforms.functional import InterpolationMode
 from functools import cached_property
+import torch.nn.functional as F
 
 ###############################################################
 # Data Loading
 ###############################################################
 
 DATA_DIR='./data'
-BATCH_SIZE = 4
-# BATCH_SIZE = 16
+# BATCH_SIZE = 4
+BATCH_SIZE = 16
 IGNORE_INDEX = 0
 
 def replace_tensor_val(tensor, a, b):
@@ -243,6 +244,33 @@ def forward_pass_poc():
     print(output.shape)
 # forward_pass_poc()
 
+class DiceLoss(nn.Module):
+    def __init__(self, smooth=1e-6, ignore_index=None):
+        super().__init__()
+        self._smooth = smooth
+    def forward(self, predictions, targets):
+        num_classes = predictions.size(1)
+        predictions = F.softmax(predictions, dim=1)
+
+        # M, H, W, N
+        targets_1_hot = F.one_hot(targets, num_classes=num_classes)
+        # M, N, H, W
+        targets_1_hot = targets_1_hot.permute(0,3,1,2).float()
+        # TODO?
+        predictions_flat = predictions.view(predictions.size(0), predictions.size(1), -1)  #M, N, H*W
+        targets_flat = targets_1_hot.view(targets_1_hot.size(0), targets_1_hot.size(1), -1)  # (M, N, H*W)
+
+        intersection = (predictions_flat * targets_flat).sum(dim=2)  # (M, N)
+        denominator = predictions_flat.sum(dim=2) + targets_flat.sum(dim=2)  # (M, N)
+
+        dice_score = (2. * intersection + self._smooth) / (denominator + self._smooth)  # (M, N)
+
+        dice_loss_per_class = 1 - dice_score.mean(dim=0)  # (N,)
+        dice_loss = dice_loss_per_class.mean()
+
+        return dice_loss
+
+
 ###############################################################
 # Model Training 
 ###############################################################
@@ -345,7 +373,8 @@ model = UNet(class_num = len(train_dataset.classes))
 # TODO: let's see this imbalance dataset
 zero_class_weight = 0.01
 other_class_weight = (1-zero_class_weight)/(len(train_dataset.classes)-1)
-criterion = nn.CrossEntropyLoss()
+criterion = DiceLoss()
+# criterion = nn.CrossEntropyLoss()
 # criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
 weight_decay = 0.0001
 # momentum=0.9
