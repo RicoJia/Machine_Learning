@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from torchvision.transforms.functional import InterpolationMode
 from functools import cached_property
 import torch.nn.functional as F
+import time
 
 ###############################################################
 # Data Loading
@@ -121,6 +122,8 @@ def visualize_image_and_target(image, target=None, labels=None):
 
     # See tensor([  0,   1,  15, 255], dtype=torch.uint8)
     plt.show()
+    tiempo = int(time.time() * 1000)
+    plt.savefig(str(tiempo)+".png")
 
 # print("classes: ", train_dataset.classes)
 # for image, target in train_dataset:
@@ -239,8 +242,6 @@ class UNet(nn.Module):
                     nn.init.constant_(m.weight, 1.0)
                     nn.init.constant_(m.bias, 0.0)
                     print(f"{type(m)}, const init")
-
-
 
 def forward_pass_poc():
     image, target = train_dataset[0]
@@ -375,6 +376,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         scheduler.step(metrics=validation_loss)  # TODO: disabled for Adam optimizer
         print("elapsed: ", end-start)
 
+        print(f"Saving Models")
         torch.save(model.state_dict(), MODEL_PATH)
         print(f"epoch: {epoch}, saved the model. "
               f'Train Loss: {epoch_loss:.4f} '
@@ -384,7 +386,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     return model
 
 class_num = len(train_dataset.classes)
-model = UNet(class_num = class_num)
 
 # TODO: let's see this imbalance dataset
 zero_class_weight = 0.01
@@ -394,7 +395,8 @@ criterion = DiceLoss()
 # criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
 weight_decay = 0.0001
 # momentum=0.9
-learning_rate=0.001
+# learning_rate=0.001
+learning_rate=0.002
 num_epochs=70
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -413,29 +415,33 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 if os.path.exists(MODEL_PATH):
     model.load_state_dict(torch.load(MODEL_PATH, weights_only=False, map_location=device))
     print("loaded model")
+else:
+    model = UNet(class_num = class_num)
+    print("Initialized model")
+
 model.to(device)
 
 
-model = train_model(model, train_dataloader, val_dataloader, criterion, optimizer, scheduler,
-                    num_epochs=num_epochs, device=device)
-#
-# ###############################################################
-# # Model Evaluation
-# ###############################################################
-#
-# def calculate_average_weights(model):
-#     total_sum = 0
-#     total_elements = 0
-#     for name, param in model.named_parameters():
-#         if 'weight' in name:
-#             weight_mean = param.mean().item()
-#             total_sum += param.sum().item()
-#             total_elements += param.numel()
-#             print(f"Layer: {name} | Average Weight: {weight_mean:.6f}")
-#
-#     overall_average = total_sum / total_elements if total_elements > 0 else 0
-#     print(f"Overall Average Weight in the Network: {overall_average:.6f}")
-#
-# calculate_average_weights(model)
-#
-# eval_model(model, test_dataloader, device=device, visualize=True)
+# model = train_model(model, train_dataloader, val_dataloader, criterion, optimizer, scheduler,
+#                     num_epochs=num_epochs, device=device)
+
+###############################################################
+# Model Evaluation
+###############################################################
+
+def calculate_average_weights(model):
+    total_sum = 0
+    total_elements = 0
+    for name, param in model.named_parameters():
+        if 'weight' in name:
+            weight_mean = param.mean().item()
+            total_sum += param.sum().item()
+            total_elements += param.numel()
+            print(f"Layer: {name} | Average Weight: {weight_mean:.6f}")
+
+    overall_average = total_sum / total_elements if total_elements > 0 else 0
+    print(f"Overall Average Weight in the Network: {overall_average:.6f}")
+
+calculate_average_weights(model)
+
+eval_model(model, test_dataloader, device=device, visualize=True)
