@@ -36,4 +36,31 @@
 
 - `class_names = train_data.classes`
 
+## UNet Questions:
+
+### UNet Low Training Accuracy
+
+- Tried SGD
+- Tried data with `nn.CrossEntropyLoss(ignore_index)`. The final learning is bad. 
+    - Do I need to subtract the avg and std dev in test set? 
+- Try adding batch norm in conv layers.
+- RuntimeError: Mismatched Tensor types in NNPack convolutionOutput: This is because there's a mis match in types
+    - One hidden bug could be not having `inputs, labels = inputs.to(device), labels.to(device)  # Move inputs and labels to the correct device`, so inputs and labels are not on the same device
+- "skip downloading"
+    ```python
+    def is_extracted(dataset_dir, year='2007'):
+        extracted_train_path = os.path.join(dataset_dir, 'VOCdevkit', f'VOC{year}', 'ImageSets', 'Segmentation', 'train.txt')
+        return os.path.exists(extracted_train_path)
+
+    self._dataset = datasets.VOCSegmentation(
+        root=DATA_DIR,  # Specify where to store the data
+        year='2007',    # Specify the year of the dataset (2007 in this case)
+        image_set=image_set,  # You can use 'train', 'val', or 'trainval'
+        download=not is_extracted(dataset_dir=DATA_DIR),  # Automatically download if not available
+        transform=image_seg_transforms,  # Apply transformations to the images
+        target_transform=target_seg_transforms  # Apply transformations to the masks
+    )
+    ```
+
+
 

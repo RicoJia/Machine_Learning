@@ -12,4 +12,4 @@ build/
 
 .jupyter/
 .ipython/
-models/data/
+RicoModels/data/

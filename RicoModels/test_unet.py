@@ -1,5 +1,6 @@
 from numpy import ndim
-from utils.losses import dice_loss
+import os
+from utils.losses import dice_loss, DiceLoss
 import torch
 import torchvision
 from torchvision import transforms, datasets
@@ -23,13 +24,17 @@ def replace_tensor_val(tensor, a, b):
     tensor[tensor==a] = b
     return tensor
 
+def is_extracted(dataset_dir, year='2007'):
+    extracted_train_path = os.path.join(dataset_dir, 'VOCdevkit', f'VOC{year}', 'ImageSets', 'Segmentation', 'train.txt')
+    return os.path.exists(extracted_train_path)
+
+
 image_seg_transforms = transforms.Compose([
    v2.Resize((256, 256)),
     # Becareful because you want to rotate your transforms by the same amount
     # v2.RandomHorizontalFlip(),
     # v2.RandomVerticalFlip(),
     # v2.RandomRotation(degrees=15),
-
    v2.ToTensor(),
    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
@@ -48,7 +53,7 @@ class VOCSegmentationClass(Dataset):
             root=DATA_DIR,  # Specify where to store the data
             year='2007',    # Specify the year of the dataset (2007 in this case)
             image_set=image_set,  # You can use 'train', 'val', or 'trainval'
-            download=True,  # Automatically download if not available
+            download=not is_extracted(dataset_dir=DATA_DIR),  # Automatically download if not available
             transform=image_seg_transforms,  # Apply transformations to the images
             target_transform=target_seg_transforms  # Apply transformations to the masks
         )
@@ -75,6 +80,15 @@ train_dataloader = torch.utils.data.DataLoader(
     pin_memory = True
 )
 
+val_dataset = VOCSegmentationClass(image_set='val')
+val_dataloader = torch.utils.data.DataLoader(
+    val_dataset,
+    batch_size = BATCH_SIZE,
+    shuffle=True,
+    num_workers = 2,
+    pin_memory = True
+)
+
 test_dataset = VOCSegmentationClass(image_set='test')
 test_dataloader = torch.utils.data.DataLoader(
     test_dataset,
@@ -83,8 +97,6 @@ test_dataloader = torch.utils.data.DataLoader(
     num_workers = 2,
     pin_memory = True
 )
-
-### TODO: skip data extracting?
 
 def visualize_image_and_target(image, target=None, labels=None):
     # # See torch.Size([3, 281, 500]) torch.Size([1, 281, 500])
@@ -143,6 +155,8 @@ class ConvBlock(nn.Module):
     def forward(self, x):
         x = self.relu( self.bn1(self.conv1(x)))
         return self.relu(self.bn2(self.conv2(x)))
+        # x = self.relu( self.conv1(x))
+        # return self.relu(self.conv2(x))
 
 class Encoder(nn.Module):
     def __init__(self, in_channels):
@@ -222,9 +236,10 @@ class UNet(nn.Module):
                     nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                     print(f"{type(m)}, he initialization")
                 elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                    nn.init.constant_(m.weight, 1)
-                    nn.init.constant_(m.bias, 0)
+                    nn.init.constant_(m.weight, 1.0)
+                    nn.init.constant_(m.bias, 0.0)
                     print(f"{type(m)}, const init")
+
 
 
 def forward_pass_poc():
@@ -252,7 +267,7 @@ def forward_pass_poc():
 
 
 ###############################################################
-# Model Training 
+# Model Eval 
 ###############################################################
 
 def eval_model(model, test_loader, device, visualize: bool = False):
@@ -283,8 +298,25 @@ def eval_model(model, test_loader, device, visualize: bool = False):
     test_acc = 100. * correct_test / total_test
     print(f'Test Acc: {test_acc:.2f}%')
 
+def validate_model(model, val_loader, device):
+    model.eval()
+    val_loss = 0.0
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            #make sure data is on CPU/GPU
+            inputs, labels = inputs.to(device), labels.to(device)  # Move inputs and labels to the correct device
+            outputs = model(inputs)
+            val_loss += dice_loss(outputs=outputs, labels = labels).item()
+    val_loss /= len(val_loader)
+    return val_loss
+
+
+###############################################################
+# Model Training
+###############################################################
+
+
 import time
-import os
 from torch import optim
 
 # Define the training function
@@ -292,7 +324,7 @@ MODEL_PATH = 'unet_pascal.pth'
 ACCUMULATION_STEPS = 8
 
 # Check against example
-def train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, num_epochs=25, device='cpu'):
+def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs=25, device='cpu'):
     model.to(device)
     for epoch in range(num_epochs):
         # Training phase
@@ -310,8 +342,10 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, schedule
             outputs = model(inputs)
             # This is because torch.nn.CrossEntropyLoss(reduction='mean') is true, so to simulate a larger batch, we need to further divide
             # print(f"output: {outputs.dtype}, labels: {labels.dtype}")
-            loss = criterion(outputs, labels)/ACCUMULATION_STEPS
-            loss += dice_loss(outputs=outputs, labels=labels, )
+            # loss = (criterion(outputs, labels) + dice_loss(outputs=outputs, labels=labels, ))/ACCUMULATION_STEPS
+            loss = criterion(outputs, labels)
+
+            # TODO
             # Backward pass and optimization
             loss.backward()
             if (i+1)%ACCUMULATION_STEPS == 0:
@@ -326,12 +360,10 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, schedule
             mask = (labels != 21)
             total_train += mask.sum().item()
             # print((predicted == labels).sum().item(), ((predicted == labels) & mask).sum().item())
-            # print(mask.sum().item())
-            
+
             correct_train += ((predicted == labels) & mask).sum().item()
 
         # adjust after every epoch
-        scheduler.step()  # TODO: disabled for Adam optimizer
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Current learning rate: {current_lr}")
         epoch_loss = running_loss / len(train_loader.dataset)
@@ -339,6 +371,8 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, schedule
         print("correct train: ", correct_train, " total train: ", total_train)
         end = time.time()
         
+        validation_loss = validate_model(model, val_loader, device)
+        scheduler.step(metrics=validation_loss)  # TODO: disabled for Adam optimizer
         print("elapsed: ", end-start)
 
         torch.save(model.state_dict(), MODEL_PATH)
@@ -355,8 +389,8 @@ model = UNet(class_num = class_num)
 # TODO: let's see this imbalance dataset
 zero_class_weight = 0.01
 other_class_weight = (1-zero_class_weight)/(len(train_dataset.classes)-1)
-# criterion = DiceLoss()
-criterion = nn.CrossEntropyLoss()
+criterion = DiceLoss()
+# criterion = nn.CrossEntropyLoss()
 # criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
 weight_decay = 0.0001
 # momentum=0.9
@@ -371,7 +405,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 # multiply learning rate by 0.1 after 30% of epochs
 
 # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=int(0.3*num_epochs), gamma=0.1)
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)  # goal: minimize Dice score
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -382,9 +416,7 @@ if os.path.exists(MODEL_PATH):
 model.to(device)
 
 
-
-
-model = train_model(model, train_dataloader, test_dataloader, criterion, optimizer, scheduler,
+model = train_model(model, train_dataloader, val_dataloader, criterion, optimizer, scheduler,
                     num_epochs=num_epochs, device=device)
 #
 # ###############################################################
