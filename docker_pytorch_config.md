@@ -34,9 +34,13 @@
 
 - Learning Rate = 0.01 is quite high for Adam, 0.1 is good for `SGD`
 
-- `class_names = train_data.classes`
+## "Modern" Python Packages?
+- May not have setup.py, but has a `pyproject.toml`, it's supported by `setuptools` and `poetry`. `pip install -e .`
+- Ruff: `ruff check --fix`: 
+    - Covers linting by `flake8`, `isort`, `pyflakes` (potential bugs), and `pycodestyle`. 
+    - In comparison, `black` mainly focuses on linting, making sure code is compliant with (PEP8).
 
-## UNet Questions:
+## UNet Questions
 
 ### UNet Low Training Accuracy
 
