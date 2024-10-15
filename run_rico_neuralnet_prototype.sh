@@ -32,7 +32,7 @@ echo "Running docker..."
 
 # IMAGE_NAME=ros2-image-processing-rico
 IMAGE_NAME=rico_cuda_image
-TAG_NAME=r36.3.0-cu122-torchvision
+TAG_NAME=r36.3.0
 THIS_DIRECTORY_PATH="$(dirname "${BASH_SOURCE[0]}")"
 THIS_DIRECTORY_NAME="$(basename "$(dirname "${BASH_SOURCE[0]}")")"
 # Add this for nvidia 
