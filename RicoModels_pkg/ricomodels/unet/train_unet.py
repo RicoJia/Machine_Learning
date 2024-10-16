@@ -17,11 +17,12 @@ MODEL_PATH = os.path.join(get_pkg_dir(), "unet/unet_pascal.pth")
 CHECKPOINT_DIR = os.path.join(get_pkg_dir(), "unet/checkpoints")
 ACCUMULATION_STEPS = 32/BATCH_SIZE
 NUM_EPOCHS=70
-LEARNING_RATE=1e-3
+LEARNING_RATE=1e-5
 SAVE_CHECKPOINT = True
+SAVE_EVERY_N_EPOCH = 10
 AMP = False
 INTERMEDIATE_BEFORE_MAX_POOL = False
-WEIGHT_DECAY = 1e-5
+WEIGHT_DECAY = 1e-8
 MOMENTUM = 0.999
 
 @functools.cache
@@ -76,8 +77,8 @@ def validate_model(model, val_loader, device):
 # Check against example
 def train_model(model, train_loader, val_loader, 
                 criterion, optimizer, scheduler, 
-                num_training, wandb_logger, NUM_EPOCHS=25, device='cpu'):
-    for epoch in range(NUM_EPOCHS):
+                num_training, wandb_logger, NUM_EPOCHS, device='cpu'):
+    for epoch in range(1, NUM_EPOCHS+1):
         # Training phase
         start = time.time()
         model.train()
@@ -85,7 +86,7 @@ def train_model(model, train_loader, val_loader,
         correct_train = 0
         total_train = 0
         
-        with tqdm(total = num_training, desc=f"Epoch [{epoch + 1}/{NUM_EPOCHS}]", unit='img') as pbar:
+        with tqdm(total = num_training, desc=f"Epoch [{epoch }/{NUM_EPOCHS}]", unit='img') as pbar:
             for i, (inputs, labels) in enumerate(train_loader):
                 _check_channel(img_channels=inputs.shape[1], model_channels=model.n_channels)
                 inputs = inputs.to(device)
@@ -109,7 +110,6 @@ def train_model(model, train_loader, val_loader,
     #         running_loss += loss.item() * inputs.size(0)
     #         _, predicted = outputs.max(1)
     #         # print(predicted.shape)
-    #         mask = (labels != 21)
     #         total_train += mask.sum().item()
     #         # print((predicted == labels).sum().item(), ((predicted == labels) & mask).sum().item())
     #         correct_train += ((predicted == labels) & mask).sum().item()
@@ -122,11 +122,10 @@ def train_model(model, train_loader, val_loader,
             wandb_logger.log({
                 'train loss': loss.item(),
                 'epoch': epoch,
-                'step': i,
                 'learning rate': current_lr
             })
 
-        if SAVE_CHECKPOINT:
+        if SAVE_CHECKPOINT and epoch % SAVE_EVERY_N_EPOCH==0:
             if not os.path.exists(CHECKPOINT_DIR):
                 os.mkdir(CHECKPOINT_DIR)
             file_name = f"unet_epoch_{epoch}.pth"
@@ -138,7 +137,7 @@ def train_model(model, train_loader, val_loader,
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    train_dataset = VOCSegmentationClass(image_set='train', year='2007')
+    train_dataset = VOCSegmentationClass(image_set='train', year='2012')
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size = BATCH_SIZE,
@@ -146,7 +145,7 @@ if __name__ == "__main__":
         num_workers = 2,
         pin_memory = True
     ) 
-    val_dataset = VOCSegmentationClass(image_set='val', year='2007')
+    val_dataset = VOCSegmentationClass(image_set='val', year='2012')
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size = BATCH_SIZE,
@@ -203,7 +202,9 @@ if __name__ == "__main__":
         Optimizer:       {str(optimizer)}
     ''')
     try:
-        train_model(model, train_dataloader, val_dataloader, criterion, optimizer, scheduler,
+        train_model(model = model, train_loader = train_dataloader, 
+                    val_loader = val_dataloader, criterion = criterion, 
+                    optimizer = optimizer, scheduler = scheduler,
                             NUM_EPOCHS=NUM_EPOCHS, device=device, num_training = len(train_dataset),
                             wandb_logger=wandb_logger)
     except torch.cuda.OutOfMemoryError:
@@ -211,7 +212,9 @@ if __name__ == "__main__":
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
         model.use_checkpointing()
-        train_model(model, train_dataloader, val_dataloader, criterion, optimizer, scheduler,
+        train_model(model = model, train_loader = train_dataloader, 
+                    val_loader = val_dataloader, criterion = criterion, 
+                    optimizer = optimizer, scheduler = scheduler,
                             NUM_EPOCHS=NUM_EPOCHS, device=device, num_training = len(train_dataset),
                             wandb_logger=wandb_logger)
 

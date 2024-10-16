@@ -28,7 +28,7 @@ def get_pkg_dir():
         raise FileNotFoundError("Package 'ricomodels' not found")
 
 class VOCSegmentationClass(Dataset):
-    def __init__(self, image_set, year='2007'):
+    def __init__(self, image_set, year):
         image_seg_transforms = transforms.Compose([
             v2.Resize((256, 256)),
             # Becareful because you want to rotate your transforms by the same amount
