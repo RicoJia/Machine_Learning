@@ -152,7 +152,7 @@ PyGObject==3.42.1
 dbus-python==1.2.18
 lazr.restfulclient==0.14.4
 blinker==1.4
-zipp==1.0.0
+zipp==3.19.1
 lazr.uri==1.0.6
 launchpadlib==1.10.16
 cryptography==3.4.8
