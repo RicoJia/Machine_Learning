@@ -1,0 +1,39 @@
+{
+  "os": "Linux-5.15.136-tegra-aarch64-with-glibc2.35",
+  "python": "3.10.12",
+  "startedAt": "2024-10-16T13:40:15.976630Z",
+  "program": "/home/rico/RicoModels_pkg/ricomodels/unet/train_unet.py",
+  "codePath": "unet/train_unet.py",
+  "git": {
+    "remote": "git@github.com:RicoJia/Machine_Learning.git"
+  },
+  "root": "/home/rico/RicoModels_pkg/ricomodels",
+  "host": "rico-orin",
+  "username": "root",
+  "executable": "/usr/local/bin/python3",
+  "codePathLocal": "unet/train_unet.py",
+  "cpu_count": 6,
+  "cpu_count_logical": 6,
+  "gpu": "[Orin (nvgpu)]",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "489571201024",
+      "used": "89762009088"
+    }
+  },
+  "memory": {
+    "total": "7990452224"
+  },
+  "cpu": {
+    "count": 6,
+    "countLogical": 6
+  },
+  "gpu_nvidia": [
+    {
+      "name": "Orin (nvgpu)",
+      "architecture": "Ampere"
+    }
+  ],
+  "cudaVersion": "12.2"
+}

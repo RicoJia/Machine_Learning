@@ -1,5 +1,6 @@
 # This has not been installed yet!
-from .. import dice_loss
+from ricomodels.utils.losses import dice_loss
+import torch
 
 def test_dice():
     outputs = torch.tensor([

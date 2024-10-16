@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "ricomodels"
+version = "0.1.0"
+description = "This is Rico's Neural Network models"
+authors = ["Rico Jia"]
+license = "BSD-2"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+torch = "^2.2.0"
+tqdm = "^4.66.5"
+wandb = "^0.18.3"
+pytest = "^8.3.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

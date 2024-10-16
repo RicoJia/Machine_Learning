@@ -12,4 +12,5 @@ build/
 
 .jupyter/
 .ipython/
-RicoModels/data/
+RicoModels_pkg/ricomodels/data
+Pytorch-UNet/

@@ -1,4 +1,4 @@
-# jetson-containers build --name=rico_cuda_image jupyterlab pytorch
+# jetson-containers build --name=rico_cuda_image jupyterlab pytorch torchvision
 show_help(){
   echo "Usage: $0 [-j] [-h]"
   echo
