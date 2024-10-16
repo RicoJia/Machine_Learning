@@ -111,7 +111,7 @@ traitlets==5.14.3
 babel==2.16.0
 jupyter_client==8.6.3
 soupsieve==2.6
-jupyterlab==4.2.0
+jupyterlab==4.2.5
 bleach==6.1.0
 nest-asyncio==1.6.0
 jupyterlab_pygments==0.3.0
