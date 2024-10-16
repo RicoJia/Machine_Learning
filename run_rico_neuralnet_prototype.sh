@@ -70,7 +70,7 @@ echo "jupyter"
         -v $XAUTH:$XAUTH \
         -v /dev:/dev:rw \
         -p 8888:8888 \
-        -it --rm \
+        -itd --rm \
         --runtime nvidia \
         --network=host \
         --privileged \
@@ -92,7 +92,7 @@ else
         -v $XAUTH:$XAUTH \
         -v /dev:/dev:rw \
         -p 8888:8888 \
-        -it --rm \
+        -itd --rm \
         --runtime nvidia \
         --network=host \
         --privileged \

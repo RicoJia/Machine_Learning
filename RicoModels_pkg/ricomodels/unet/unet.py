@@ -4,6 +4,7 @@
 from torch import nn as nn
 from collections import deque
 import torch
+from torchvision.transforms import v2, CenterCrop
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -43,14 +44,13 @@ class Encoder(nn.Module):
         # returns unpooled output from each block:
         # [intermediate results ... ], but we don't want to return
         intermediate_outputs = deque([])
-        x = self._layers[0](x)
-        for i in range(1, len(self._layers)):
-            x = self._layers[i](x)
-            if self._intermediate_before_max_pool:
-                intermediate_outputs.appendleft(x)
-            x = self._maxpool(x)
-            if not self._intermediate_before_max_pool:
-                intermediate_outputs.appendleft(x)
+        for i in range(0, len(self._layers)):
+            x1 = self._layers[i](x)
+            x = self._maxpool(x1)
+            # Add the intermediate result if not the bottom
+            if i != len(self._layers)-1:
+                intermediate_outputs.appendleft(x1) \
+                    if self._intermediate_before_max_pool else intermediate_outputs.appendleft(x)
         return x, intermediate_outputs
 
 class Decoder(nn.Module):
@@ -84,7 +84,7 @@ class Decoder(nn.Module):
         return x
     def crop(self, skip_input, x):
         _, _, H, W = x.shape
-        return CenterCrop((H,W))(skip_input)
+        return v2.CenterCrop((H,W))(skip_input)
 
 class UNet(nn.Module):
     def __init__(self, class_num, intermediate_before_max_pool: bool):
@@ -100,11 +100,13 @@ class UNet(nn.Module):
         # 1x1
         self._head = nn.Conv2d(in_channels=decoder_channels[-1], out_channels=class_num, kernel_size=1)
         self._init_weight()
+        self.n_channels = encoder_in_channels[0]
 
     def forward(self, x):
         _, _, H, W = x.shape
         x, intermediate = self._encoder(x)
         output = self._decoder(x, intermediate)
+        # raw logits
         output = self._head(output)
         output = torch.nn.functional.interpolate(output, size=(H,W),  mode='nearest')
         return output
@@ -117,7 +119,11 @@ class UNet(nn.Module):
                 elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                     nn.init.constant_(m.weight, 1.0)
                     nn.init.constant_(m.bias, 0.0)
-    
+    def use_checkpointing(self):
+        self._encoder = torch.utils.checkpoint(self._encoder)
+        self._decoder = torch.utils.checkpoint(self._decoder)
+        self._head = torch.utils.checkpoint(self._head)
+        
 if __name__ == "__main__":
     # forward_pass_poc()
     image, target = train_dataset[0]

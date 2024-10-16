@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch.functional as F
 
 def dice_loss(outputs, labels,  epsilon=1e-6):
+    """
+    outputs: (n, class_num, h, w)
+    """
     # Ensure labels are in long (int64) type
     if labels.dtype != torch.int64:
         labels = labels.to(torch.int64)
