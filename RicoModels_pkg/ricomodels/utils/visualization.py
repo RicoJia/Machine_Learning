@@ -1,6 +1,10 @@
 #! /usr/bin/env python3
 
 import matplotlib.pyplot as plt
+import os
+import time
+
+RESULTS_DIR = "/tmp/results/"
 
 def visualize_image_target_mask(image, target=None, labels=None):
     # # See torch.Size([3, 281, 500]) torch.Size([1, 281, 500])
@@ -26,4 +30,9 @@ def visualize_image_target_mask(image, target=None, labels=None):
     # See tensor([  0,   1,  15, 255], dtype=torch.uint8)
     plt.show()
     tiempo = int(time.time() * 1000)
-    plt.savefig(str(tiempo)+".png")
+
+
+    if not os.path.exists(RESULTS_DIR):
+        os.mkdir(RESULTS_DIR)
+
+    plt.savefig(RESULTS_DIR + str(tiempo)+".png")

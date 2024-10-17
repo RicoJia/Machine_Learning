@@ -15,4 +15,5 @@ build/
 RicoModels_pkg/ricomodels/data
 Pytorch-UNet/
 
-RicoModels_pkg/ricomodels/wandb
+RicoModels_pkg/ricomodels/unet/checkpoints/
+RicoModels_pkg/ricomodels/wandb/
