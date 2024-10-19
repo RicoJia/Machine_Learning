@@ -1,9 +1,10 @@
 #! /usr/bin/env python3
 import torch
 import torch.nn as nn
-from ricomodels.utils.losses import dice_loss, DiceLoss
-from ricomodels.utils.data_loading import VOCSegmentationClass, get_pkg_dir
+from ricomodels.utils.losses import dice_loss, DiceLoss, FocalLoss
+from ricomodels.utils.data_loading import VOCSegmentationClass, get_pkg_dir, CarvanaDataset, GTA5Dataset
 from ricomodels.unet.unet import UNet
+from ricomodels.utils.visualization import get_total_weight_norm, wandb_weight_histogram_logging
 import time
 import os
 from torch import optim
@@ -47,7 +48,7 @@ def validate_model(model, val_loader, device):
     return val_loss
 
 # Check against example
-def train_model(model, train_loader, val_loader, 
+def train_model(model, train_loader, 
                 criterion, optimizer, scheduler, 
                 num_training, wandb_logger, NUM_EPOCHS, device='cpu'):
     for epoch in range(1, NUM_EPOCHS+1):
@@ -68,8 +69,9 @@ def train_model(model, train_loader, val_loader,
                 outputs = model(inputs)
                 # print(f"output: {outputs.dtype}, labels: {labels.dtype}")
                 # This is because torch.nn.CrossEntropyLoss(reduction='mean') is true, so to simulate a larger batch, we need to further divide
-                loss = (criterion(outputs, labels) +\
-                    dice_loss(outputs=outputs, labels=labels.float(), ))/ACCUMULATION_STEPS
+                # loss = (criterion(outputs, labels) +\
+                #     dice_loss(outputs=outputs, labels=labels.float(), ))/ACCUMULATION_STEPS
+                loss = criterion(outputs, labels) /ACCUMULATION_STEPS
                 pbar.update(inputs.shape[0])
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
 
@@ -80,20 +82,19 @@ def train_model(model, train_loader, val_loader,
                 epoch_loss += loss.item() 
 
             epoch_loss /= num_training
-    #         _, predicted = outputs.max(1)
-    #         # print(predicted.shape)
-    #         total_train += mask.sum().item()
-    #         # print((predicted == labels).sum().item(), ((predicted == labels) & mask).sum().item())
-    #         correct_train += ((predicted == labels) & mask).sum().item()
-    #     epoch_acc = 100. * correct_train / total_train
             
             current_lr = optimizer.param_groups[0]['lr']
-            validation_loss = validate_model(model, val_loader, device)
-            scheduler.step(metrics=validation_loss)  # TODO: disabled for Adam optimizer
+            # TODO: this is NOT standard practice. We don't have validation set just for a quick PoC
+            # validation_loss = validate_model(model, val_loader, device)
+            # scheduler.step(metrics=validation_loss)  # TODO: disabled for Adam optimizer
+            scheduler.step(metrics=epoch_loss)  # TODO: disabled for Adam optimizer
+            total_grad_norm = get_total_weight_norm(model)
+            wandb_weight_histogram_logging(model, epoch)
             wandb_logger.log({
                 'epoch loss': epoch_loss,
                 'epoch': epoch,
-                'learning rate': current_lr
+                'learning rate': current_lr,
+                'total_grad_norm': total_grad_norm,
             })
 
         if SAVE_CHECKPOINT and epoch % SAVE_EVERY_N_EPOCH==0:
@@ -108,7 +109,10 @@ def train_model(model, train_loader, val_loader,
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    train_dataset = VOCSegmentationClass(image_set='train', year='2012')
+    # train_dataset = CarvanaDataset(dataset_name="train")
+    train_dataset = GTA5Dataset()
+    
+    # train_dataset = VOCSegmentationClass(image_set='train', year='2007')
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size = BATCH_SIZE,
@@ -116,36 +120,43 @@ if __name__ == "__main__":
         num_workers = 2,
         pin_memory = True
     ) 
+    # val_dataset = VOCSegmentationClass(image_set='val', year='2007')
+    # val_dataloader = torch.utils.data.DataLoader(
+    #     val_dataset,
+    #     batch_size = BATCH_SIZE,
+    #     shuffle=False,  # A bit more deterministic here
+    #     num_workers = 2,
+    #     pin_memory = True
+    # )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     class_num = len(train_dataset.classes)
     # TODO: let's see this imbalance dataset
-    # criterion = DiceLoss()
-    criterion = nn.CrossEntropyLoss()
-    # criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
-    # momentum=0.9
-    # LEARNING_RATE=0.001
+    criterion = FocalLoss()
+    # criterion = nn.CrossEntropyLoss()
 
+    model = UNet(class_num = class_num, 
+                    intermediate_before_max_pool=INTERMEDIATE_BEFORE_MAX_POOL)
+    # TODO
+    print("norm: ", get_total_weight_norm(model))
     if os.path.exists(MODEL_PATH):
         model.load_state_dict(torch.load(MODEL_PATH, weights_only=False, map_location=device))
-        print("loaded model")
+        print("Loaded model")
     else:
-        model = UNet(class_num = class_num, 
-                     intermediate_before_max_pool=INTERMEDIATE_BEFORE_MAX_POOL)
         print("Initialized model")
+
     model.to(device)
     optimizer = optim.RMSprop(model.parameters(),
                               lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, momentum=MOMENTUM,
                               foreach=True)
     # optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)  # goal: minimize Dice score
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)  # goal: minimize Dice score
 
     wandb_logger = wandb.init(project='Rico-U-Net', resume='allow', anonymous='must')
     wandb_logger.config.update(
         dict(epochs=NUM_EPOCHS, batch_size=BATCH_SIZE * ACCUMULATION_STEPS, learning_rate=LEARNING_RATE,
              weight_decay = WEIGHT_DECAY,
              training_size = len(train_dataset),
-             validation_size = len(val_dataset),
              intermediate_before_max_pool = INTERMEDIATE_BEFORE_MAX_POOL,
              save_checkpoint=SAVE_CHECKPOINT, amp=AMP, 
              optimizer = str(optimizer)
@@ -157,7 +168,6 @@ if __name__ == "__main__":
         Learning rate:   {LEARNING_RATE}
         Weight decay:    {WEIGHT_DECAY}
         Training size:   {len(train_dataset)}
-        Validation size: {len(val_dataset)}
         Intermediate_before_max_pool : {INTERMEDIATE_BEFORE_MAX_POOL}
         Checkpoints:     {SAVE_CHECKPOINT}
         Device:          {device.type}
@@ -166,7 +176,7 @@ if __name__ == "__main__":
     ''')
     try:
         train_model(model = model, train_loader = train_dataloader, 
-                    val_loader = val_dataloader, criterion = criterion, 
+                    criterion = criterion, 
                     optimizer = optimizer, scheduler = scheduler,
                             NUM_EPOCHS=NUM_EPOCHS, device=device, num_training = len(train_dataset),
                             wandb_logger=wandb_logger)
@@ -176,7 +186,7 @@ if __name__ == "__main__":
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
         model.use_checkpointing()
         train_model(model = model, train_loader = train_dataloader, 
-                    val_loader = val_dataloader, criterion = criterion, 
+                    criterion = criterion, 
                     optimizer = optimizer, scheduler = scheduler,
                             NUM_EPOCHS=NUM_EPOCHS, device=device, num_training = len(train_dataset),
                             wandb_logger=wandb_logger)
