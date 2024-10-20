@@ -12,12 +12,14 @@ This script uploads a file or one directory, assuming aws client has been set up
 """
 THIS_PACKAGE = "ricomodels"
 
+
 def find_this_pkg_path():
     spec = importlib.util.find_spec(THIS_PACKAGE)
     if spec is None:
         raise FileExistsError(f"Package {THIS_PACKAGE} is not installed yet. Please install using pip")
     else:
         return os.path.dirname(spec.origin)
+
 
 def get_or_prompt_file_name():
     parser = argparse.ArgumentParser(description=HELP_STR)
@@ -37,6 +39,7 @@ def get_or_prompt_file_name():
             print(f"Invalid input {mode}, please enter a valid mode.")
 
     return args
+
 
 def find_file_path(pkg_path: str, args):
     for root, dirs, files in os.walk(pkg_path):
@@ -102,4 +105,3 @@ if __name__ == "__main__":
     if args.directory:
         print(f"removed zip {file_path}")
         os.remove(file_path)
-

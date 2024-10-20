@@ -5,28 +5,32 @@ import torch.nn as nn
 import torch.functional as F
 
 # TODO
+
+
 def focal_loss(outputs, targets, gamma):
     """
     outputs: (n, class_num, h, w), labels (n, h, w)
     """
     torch.set_printoptions(profile="full")
     probs = torch.nn.functional.softmax(outputs, dim=1)
-        
+
     # (n, h, w)
     p_true_class = probs.gather(1, targets.unsqueeze(1)).squeeze(1)
-    log_p_true_class = torch.log(p_true_class+ 1e-8)
-    fl = -(1-p_true_class)**gamma * (log_p_true_class)
+    log_p_true_class = torch.log(p_true_class + 1e-8)
+    fl = -(1 - p_true_class)**gamma * (log_p_true_class)
     return fl.mean()
+
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=8, ):
         super().__init__()
         self._gamma = gamma
+
     def forward(self, outputs, labels):
         return focal_loss(outputs, labels, self._gamma)
 
 
-def dice_loss(outputs, labels,  epsilon=1e-6):
+def dice_loss(outputs, labels, epsilon=1e-6):
     """
     outputs: (n, class_num, h, w), labels (n, h, w)
     """
@@ -50,5 +54,6 @@ class DiceLoss(nn.Module):
     def __init__(self, smooth=1e-6, ignore_index=None):
         super().__init__()
         self._smooth = smooth
+
     def forward(self, outputs, labels):
         return dice_loss(outputs, labels, self._smooth)

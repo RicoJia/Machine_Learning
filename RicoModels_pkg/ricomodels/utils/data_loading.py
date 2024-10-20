@@ -19,9 +19,11 @@ from PIL import Image
 DATA_DIR = 'data'
 IGNORE_INDEX = 0
 
+
 def replace_tensor_val(tensor, a, b):
     tensor[tensor == a] = b
     return tensor
+
 
 def get_pkg_dir():
     spec = importlib.util.find_spec("ricomodels")
@@ -32,6 +34,7 @@ def get_pkg_dir():
         return os.path.dirname(ricomodels_init)
     else:
         raise FileNotFoundError("Package 'ricomodels' not found")
+
 
 IMAGE_SEG_TRANSFORMS = transforms.Compose([
     v2.Resize((256, 256)),
@@ -47,7 +50,7 @@ TARGET_SEG_TRANSFORMS = transforms.Compose([
     v2.PILToTensor(),
     v2.Lambda(lambda tensor: tensor.squeeze()),
     v2.Lambda(lambda x: replace_tensor_val(
-    x.long(), 255, IGNORE_INDEX)),
+        x.long(), 255, IGNORE_INDEX)),
 ])
 
 
@@ -79,6 +82,7 @@ def download_file(url, dest_path, chunk_size=1024):
     except Exception as err:
         print(f"An error occurred while downloading {url}: {err}")
 
+
 def extract_zip(zip_path, extract_to):
     """
     Extracts a ZIP file to a specified directory.
@@ -97,8 +101,9 @@ def extract_zip(zip_path, extract_to):
     except Exception as e:
         print(f"An error occurred while extracting {zip_path}: {e}")
 
+
 class BaseDataset(Dataset):
-    def __init__(self, manual_find_class_num = False):
+    def __init__(self, manual_find_class_num=False):
         # call this after initializing these variables
         self.images = sorted(os.listdir(self._images_dir))
         self.labels = sorted(os.listdir(self._labels_dir))
@@ -108,7 +113,8 @@ class BaseDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
-    def __getitem__(self, idx): 
+
+    def __getitem__(self, idx):
         # return an image and a label. In this case, a label is an image with int8 values
         img_path = os.path.join(self._images_dir, self.images[idx])
         label_path = os.path.join(self._labels_dir, self.labels[idx])
@@ -119,13 +125,14 @@ class BaseDataset(Dataset):
 
         image = IMAGE_SEG_TRANSFORMS(image)
         label = TARGET_SEG_TRANSFORMS(label)
-        label = np.array(label).astype(np.int64)  
-        
+        label = np.array(label).astype(np.int64)
+
         if self._max_class is not None:
             unique_values = np.unique(label)
             self._max_class = max(max(unique_values), self._max_class)
             print("max: ", self._max_class)
         return image, label
+
 
 class GTA5Dataset(BaseDataset):
     def __init__(self):
@@ -146,8 +153,8 @@ class GTA5Dataset(BaseDataset):
         LABELS_URL = "http://download.visinf.tu-darmstadt.de/data/from_games/data/01_labels.zip"
         self._images_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'gta5', 'images')
         self._labels_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'gta5', 'labels')
-        self.download_and_extract(url = IMAGES_URL, dir_name = self._images_dir, zip_name = "01_images.zip")
-        self.download_and_extract(url = LABELS_URL, dir_name = self._labels_dir, zip_name = "01_labels.zip")
+        self.download_and_extract(url=IMAGES_URL, dir_name=self._images_dir, zip_name="01_images.zip")
+        self.download_and_extract(url=LABELS_URL, dir_name=self._labels_dir, zip_name="01_labels.zip")
 
         tasks_args = [
             (IMAGES_URL, self._images_dir, "01_images.zip"),
@@ -173,13 +180,14 @@ class GTA5Dataset(BaseDataset):
         dest_path = os.path.join(dir_name, zip_name)
         if not os.path.exists(dir_name):
             download_file(url=url, dest_path=dest_path)
-            extract_zip(zip_path=dest_path, extract_to=dir_name) 
+            extract_zip(zip_path=dest_path, extract_to=dir_name)
         else:
             print(f"{dir_name} already exists")
 
     @cached_property
     def classes(self):
         return set(range(35))
+
 
 class CarvanaDataset(BaseDataset):
     def __init__(self, dataset_name):
@@ -201,13 +209,15 @@ class CarvanaDataset(BaseDataset):
         if dataset_name not in ("test", "train"):
             raise FileNotFoundError("Carvana dataset can only have 'test' or 'train' sub datasets!")
         self._images_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'carvana', dataset_name)
-        self._labels_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'carvana', dataset_name+"_masks")
-        
+        self._labels_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'carvana', dataset_name + "_masks")
+
         super().__init__()
+
     @cached_property
     def classes(self):
         # 0 = background, 1 = car
         return set([0, 1])
+
 
 class VOCSegmentationClass(Dataset):
     def __init__(self, image_set, year):
@@ -221,31 +231,40 @@ class VOCSegmentationClass(Dataset):
             target_transform=TARGET_SEG_TRANSFORMS
         )
         self._classes = set()
-        #TODO Remember to remove
+        # TODO Remember to remove
         print(f'Data {image_set} Successfully Loaded')
 
     def _is_extracted(self, dataset_dir, year):
         """
         Checking if our data has been extracted
         """
-        extracted_train_path = os.path.join(dataset_dir, 'VOCdevkit', f'VOC{year}', 'ImageSets', 'Segmentation', 'train.txt')
+        extracted_train_path = os.path.join(
+            dataset_dir,
+            'VOCdevkit',
+            f'VOC{year}',
+            'ImageSets',
+            'Segmentation',
+            'train.txt')
         return os.path.exists(extracted_train_path)
 
     @cached_property
-    def classes(self): 
+    def classes(self):
         """
         Initialize classes in a lazy manner
         """
-        if len(self._classes) == 0: 
-            logging.info("Getting VOC classes") 
+        if len(self._classes) == 0:
+            logging.info("Getting VOC classes")
             for image, target in self._dataset:
                 self._classes.update(torch.unique(target).tolist())
         return self._classes
-    def __getitem__(self, index): 
+
+    def __getitem__(self, index):
         # return an image and a label. In this case, a label is an image with int8 values
         return self._dataset[index]
+
     def __len__(self):
         return len(self._dataset)
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     dataset = GTA5Dataset()

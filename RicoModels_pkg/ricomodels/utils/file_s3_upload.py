@@ -8,12 +8,14 @@ import argparse
 
 THIS_PACKAGE = "ricomodels"
 
+
 def find_this_pkg_path():
     spec = importlib.util.find_spec(THIS_PACKAGE)
     if spec is None:
         raise FileExistsError(f"Package {THIS_PACKAGE} is not installed yet. Please install using pip")
     else:
         return os.path.dirname(spec.origin)
+
 
 def get_or_prompt_file_name():
     parser = argparse.ArgumentParser("Getting Model name")
@@ -22,6 +24,7 @@ def get_or_prompt_file_name():
     if args.model == "":
         args.model = input("What's the name of model to upload?\n")
     return args.model
+
 
 def find_file_path(pkg_path: str, file_name: str):
     for root, dirs, files in os.walk(pkg_path):
@@ -80,5 +83,3 @@ if __name__ == "__main__":
     object_key = os.path.relpath(file_path, pkg_path)
 
     upload_file_to_s3(file_path, bucket_name, object_key)
-
-
