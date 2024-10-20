@@ -17,3 +17,5 @@ Pytorch-UNet/
 
 RicoModels_pkg/ricomodels/unet/checkpoints/
 RicoModels_pkg/ricomodels/wandb/
+
+*.pth
