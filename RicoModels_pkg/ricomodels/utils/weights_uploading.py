@@ -7,6 +7,8 @@ import shutil
 import os
 import argparse
 
+from google_drive_upload import authenticate, upload_file
+
 HELP_STR = """
 This script uploads a file or one directory, assuming aws client has been set up properly
 """
@@ -100,8 +102,10 @@ if __name__ == "__main__":
         file_path = shutil.make_archive(file_path, 'zip', file_path)
     object_key = os.path.relpath(file_path, pkg_path)
 
-    upload_file_to_s3(file_path, bucket_name, object_key)
+    # upload_file_to_s3(file_path, bucket_name, object_key)
 
+    service = authenticate()
+    upload_file(service, file_path, None, None)
     if args.directory:
         print(f"removed zip {file_path}")
         os.remove(file_path)

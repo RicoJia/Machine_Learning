@@ -9,8 +9,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-
 def upload_file(service, file_path, mime_type=None, parent_id=None):
     """Uploads a file to Google Drive."""
     file_name = os.path.basename(file_path)
@@ -23,6 +21,7 @@ def upload_file(service, file_path, mime_type=None, parent_id=None):
 
 def authenticate():
     """Authenticates the user and returns the Drive service."""
+    SCOPES = ['https://www.googleapis.com/auth/drive.file']
     creds = None
     # The file token.pickle stores the user's access and refresh tokens.
     if os.path.exists('token.pickle'):
