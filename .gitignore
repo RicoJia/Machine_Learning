@@ -19,3 +19,5 @@ RicoModels_pkg/ricomodels/unet/checkpoints/
 RicoModels_pkg/ricomodels/wandb/
 
 *.pth
+credentials.json
+token.pickle
