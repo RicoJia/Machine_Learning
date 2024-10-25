@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 import os
 import importlib.util
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, random_split
 from functools import cached_property
 from torchvision import transforms, datasets
 from torchvision.transforms import v2, CenterCrop
@@ -15,6 +15,9 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from PIL import Image
+from typing import Tuple, List
+import albumentations as A
+from functools import cache
 
 DATA_DIR = 'data'
 IGNORE_INDEX = 0
@@ -24,8 +27,8 @@ def replace_tensor_val(tensor, a, b):
     tensor[tensor == a] = b
     return tensor
 
-
-def get_pkg_dir():
+@cache
+def get_package_dir():
     spec = importlib.util.find_spec("ricomodels")
 
     # Get the absolute path of the package
@@ -38,12 +41,8 @@ def get_pkg_dir():
 
 IMAGE_SEG_TRANSFORMS = transforms.Compose([
     v2.Resize((256, 256)),
-    # Becareful because you want to rotate your transforms by the same amount
-    # v2.RandomHorizontalFlip(),
-    # v2.RandomVerticalFlip(),
-    # v2.RandomRotation(degrees=15),
     v2.ToTensor(),  # to 0-1
-    v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    # v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 TARGET_SEG_TRANSFORMS = transforms.Compose([
     v2.Resize((256, 256), interpolation=InterpolationMode.NEAREST),
@@ -51,6 +50,16 @@ TARGET_SEG_TRANSFORMS = transforms.Compose([
     v2.Lambda(lambda tensor: tensor.squeeze()),
     v2.Lambda(lambda x: replace_tensor_val(
         x.long(), 255, IGNORE_INDEX)),
+])
+
+np.random.seed(42)
+AUGMENTATION_TRANSFORMS = A.Compose([
+    A.HorizontalFlip(p=0.5),
+    A.RandomCrop(width=256, height=256),
+    A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=30, p=0.5),
+    A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
+    # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    A.ElasticTransform(p=1.0),
 ])
 
 
@@ -101,15 +110,17 @@ def extract_zip(zip_path, extract_to):
     except Exception as e:
         print(f"An error occurred while extracting {zip_path}: {e}")
 
-
 class BaseDataset(Dataset):
-    def __init__(self, manual_find_class_num=False):
+    def __init__(self, augmentation, images_dir, labels_dir, manual_find_class_num=False):
+        self._images_dir = images_dir
+        self._labels_dir = labels_dir
         # call this after initializing these variables
         self.images = sorted(os.listdir(self._images_dir))
         self.labels = sorted(os.listdir(self._labels_dir))
         assert len(self.images) == len(self.labels), "Number of images and labels should be equal."
 
         self._max_class = 0 if manual_find_class_num else None
+        self.augmentation = augmentation
 
     def __len__(self):
         return len(self.images)
@@ -125,17 +136,22 @@ class BaseDataset(Dataset):
 
         image = IMAGE_SEG_TRANSFORMS(image)
         label = TARGET_SEG_TRANSFORMS(label)
-        label = np.array(label).astype(np.int64)
+        if self.augmentation:
+            image = np.array(image)
+            label = np.array(label).astype(np.int64)
+            # I hate you the chanel convention mismatches!! Albumentations
+            image = image.transpose(1,2,0)
+            augmented = AUGMENTATION_TRANSFORMS(image = image, mask = label)
+            image = augmented["image"]
+            image = image.transpose(2,0,1)
 
         if self._max_class is not None:
             unique_values = np.unique(label)
             self._max_class = max(max(unique_values), self._max_class)
-            print("max: ", self._max_class)
         return image, label
 
-
 class GTA5Dataset(BaseDataset):
-    def __init__(self):
+    def __init__(self, augmentation):
         """
         GTA5/
             ├── images/
@@ -151,16 +167,17 @@ class GTA5Dataset(BaseDataset):
         """
         IMAGES_URL = "http://download.visinf.tu-darmstadt.de/data/from_games/data/01_images.zip"
         LABELS_URL = "http://download.visinf.tu-darmstadt.de/data/from_games/data/01_labels.zip"
-        self._images_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'gta5', 'images')
-        self._labels_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'gta5', 'labels')
-        self.download_and_extract(url=IMAGES_URL, dir_name=self._images_dir, zip_name="01_images.zip")
-        self.download_and_extract(url=LABELS_URL, dir_name=self._labels_dir, zip_name="01_labels.zip")
+        images_dir = os.path.join(get_package_dir(), DATA_DIR, 'gta5', 'images')
+        labels_dir = os.path.join(get_package_dir(), DATA_DIR, 'gta5', 'labels')
+        self.download_and_extract(url=IMAGES_URL, dir_name=images_dir, zip_name="01_images.zip")
+        self.download_and_extract(url=LABELS_URL, dir_name=labels_dir, zip_name="01_labels.zip")
 
         tasks_args = [
-            (IMAGES_URL, self._images_dir, "01_images.zip"),
-            (LABELS_URL, self._labels_dir, "01_labels.zip")
+            (IMAGES_URL, images_dir, "01_images.zip"),
+            (LABELS_URL, labels_dir, "01_labels.zip")
         ]
 
+        # TODO: this is not creating a pool?
         # Use ThreadPoolExecutor to download and extract concurrently
         with ThreadPoolExecutor(max_workers=2) as executor:
             # Submit all tasks to the executor
@@ -174,7 +191,7 @@ class GTA5Dataset(BaseDataset):
                     future.result()
                 except Exception as exc:
                     print(f"An error occurred with {url}: {exc}")
-        super().__init__()
+        super().__init__(augmentation = augmentation, images_dir = images_dir, labels_dir=labels_dir)
 
     def download_and_extract(self, url, dir_name, zip_name):
         dest_path = os.path.join(dir_name, zip_name)
@@ -190,7 +207,7 @@ class GTA5Dataset(BaseDataset):
 
 
 class CarvanaDataset(BaseDataset):
-    def __init__(self, dataset_name):
+    def __init__(self, dataset_name, augmentation):
         """
         carvana/
             ├── train/
@@ -208,10 +225,10 @@ class CarvanaDataset(BaseDataset):
         """
         if dataset_name not in ("test", "train"):
             raise FileNotFoundError("Carvana dataset can only have 'test' or 'train' sub datasets!")
-        self._images_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'carvana', dataset_name)
-        self._labels_dir = os.path.join(get_pkg_dir(), DATA_DIR, 'carvana', dataset_name + "_masks")
+        images_dir = os.path.join(get_package_dir(), DATA_DIR, 'carvana', dataset_name)
+        labels_dir = os.path.join(get_package_dir(), DATA_DIR, 'carvana', dataset_name + "_masks")
 
-        super().__init__()
+        super().__init__(augmentation = augmentation, images_dir = images_dir, labels_dir=labels_dir)
 
     @cached_property
     def classes(self):
@@ -219,19 +236,20 @@ class CarvanaDataset(BaseDataset):
         return set([0, 1])
 
 
-class VOCSegmentationClass(Dataset):
-    def __init__(self, image_set, year):
+class VOCSegmentationDataset(Dataset):
+    def __init__(self, image_set, year, augmentation):
         self._dataset = datasets.VOCSegmentation(
             root=DATA_DIR,
             year=year,
             image_set=image_set,
             download=not self._is_extracted(
-                dataset_dir=os.path.join(get_pkg_dir(), DATA_DIR), year=year),
+                dataset_dir=os.path.join(get_package_dir(), DATA_DIR), year=year),
             transform=IMAGE_SEG_TRANSFORMS,
             target_transform=TARGET_SEG_TRANSFORMS
         )
         self._classes = set()
         # TODO Remember to remove
+        self.augmentation = augmentation
         print(f'Data {image_set} Successfully Loaded')
 
     def _is_extracted(self, dataset_dir, year):
@@ -260,11 +278,70 @@ class VOCSegmentationClass(Dataset):
 
     def __getitem__(self, index):
         # return an image and a label. In this case, a label is an image with int8 values
+        # TODO
+        raise NotImplementedError("Need augmentation")
         return self._dataset[index]
 
     def __len__(self):
         return len(self._dataset)
 
+##################################################################
+## Tool Functions
+##################################################################
+
+def split_dataset(main_dataset: Dataset, train_dev_test_split: List[float] ) -> Tuple[Dataset, int]:
+    dataset_size = len(main_dataset)
+    assert len(train_dev_test_split) == 3, "Please have 3 floats in train_dev_test_split"
+    train_dev_test_split = np.array(train_dev_test_split) / np.sum(train_dev_test_split)
+    
+    train_size, dev_size, test_size = (train_dev_test_split * dataset_size).astype(int)
+    # addressing rounding errors
+    test_size = dataset_size - (train_size + dev_size)
+    shuffled_main_dataset = torch.utils.data.Subset(
+        main_dataset, 
+        torch.randperm(dataset_size)
+    )
+    train_dataset, dev_dataset, test_dataset = random_split(shuffled_main_dataset, [train_size, dev_size, test_size])
+    class_num = len(main_dataset.classes)
+    return train_dataset, dev_dataset, test_dataset, class_num
+    
+
+def get_data_loader(train_dataset, val_dataset, test_dataset, batch_size):
+    def data_loader(dataset, shuffle: bool):
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size = batch_size,
+            shuffle=shuffle,
+            num_workers = 2,
+            pin_memory = True
+        ) 
+    return data_loader(train_dataset, shuffle=True), \
+        data_loader(val_dataset, shuffle=False), \
+        data_loader(test_dataset, shuffle=False)
+
+def get_gta5_datasets():
+    main_dataset = GTA5Dataset(augmentation = True)
+    train_dataset, val_dataset, test_dataset, class_num  = split_dataset(main_dataset=main_dataset, train_dev_test_split=[0.8, 0.1, 0.1])
+    return train_dataset, val_dataset, test_dataset, class_num
+
+def get_carvana_datasets():
+    main_dataset = CarvanaDataset(dataset_name="train", augmentation = True)
+    # Pytorch asks for equal lengths of val and test_datasets
+    train_dataset, val_dataset, test_dataset, class_num = split_dataset(main_dataset=main_dataset, train_dev_test_split=[0.8, 0.1, 0.1])
+    # test_dataset = CarvanaDataset(dataset_name="test", augmentation = False)
+    return train_dataset, val_dataset, test_dataset, class_num
+    
+def get_VOC_segmentation_datasets():
+    train_dataset = VOCSegmentationDataset(image_set='train', year='2007', augmentation = True)
+    val_dataset = VOCSegmentationDataset(image_set='val', year='2007', augmentation=False)
+    # TODO
 
 if __name__ == '__main__':
-    dataset = GTA5Dataset()
+    # rm -rf results/ && python3 data_loading.py && mv /tmp/results/ .
+    # eog results/$(ls results/ | head -n1)
+    from ricomodels.utils.visualization import visualize_image_target_mask
+    dataset = GTA5Dataset(augmentation=True)
+    for i in range(15):
+        image, label = dataset[i]
+        img = torch.Tensor(image)
+        visualize_image_target_mask(img, target=None, labels=label)

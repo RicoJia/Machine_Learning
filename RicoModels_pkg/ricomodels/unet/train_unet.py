@@ -2,20 +2,20 @@
 import torch
 import torch.nn as nn
 from ricomodels.utils.losses import dice_loss, DiceLoss, FocalLoss
-from ricomodels.utils.data_loading import VOCSegmentationClass, get_pkg_dir, CarvanaDataset, GTA5Dataset
+from ricomodels.utils.data_loading import get_package_dir, get_data_loader, get_gta5_datasets, get_carvana_datasets
+from ricomodels.utils.training_tools import check_model_image_channel_num, EarlyStopping, eval_model
 from ricomodels.unet.unet import UNet
-from ricomodels.utils.visualization import get_total_weight_norm, wandb_weight_histogram_logging
+from ricomodels.utils.visualization import get_total_weight_norm, wandb_weight_histogram_logging, TrainingTimer
 import time
 import os
 from torch import optim
 from tqdm import tqdm
 import wandb
 import logging
-import functools
 
 BATCH_SIZE = 8
-MODEL_PATH = os.path.join(get_pkg_dir(), "unet/unet_pascal.pth")
-CHECKPOINT_DIR = os.path.join(get_pkg_dir(), "unet/checkpoints")
+MODEL_PATH = os.path.join(get_package_dir(), "unet/unet_pascal.pth")
+CHECKPOINT_DIR = os.path.join(get_package_dir(), "unet/checkpoints")
 ACCUMULATION_STEPS = int(32/BATCH_SIZE)
 NUM_EPOCHS=70
 LEARNING_RATE=1e-5
@@ -26,51 +26,23 @@ INTERMEDIATE_BEFORE_MAX_POOL = False
 WEIGHT_DECAY = 1e-8
 MOMENTUM = 0.999
 
-@functools.cache
-def _check_channel(model_channels, img_channels):
-    if model_channels != img_channels:
-        raise ValueError(
-            f'Network has been defined with {model_channels} input channels, ' \
-            f'but loaded images have {img_channels} channels. Please check that ' \
-            'the images are loaded correctly.'
-        )
-
-def validate_model(model, val_loader, device):
-    model.eval()
-    val_loss = 0.0
-    with torch.no_grad():
-        for inputs, labels in val_loader:
-            #make sure data is on CPU/GPU
-            inputs, labels = inputs.to(device), labels.to(device)  # Move inputs and labels to the correct device
-            outputs = model(inputs)
-            val_loss += dice_loss(outputs=outputs, labels = labels).item()
-    val_loss /= len(val_loader)
-    return val_loss
-
 # Check against example
 def train_model(model, train_loader, 
                 criterion, optimizer, scheduler, 
                 num_training, wandb_logger, NUM_EPOCHS, device='cpu'):
+    early_stopping = EarlyStopping()
+    timer = TrainingTimer()
     for epoch in range(1, NUM_EPOCHS+1):
-        # Training phase
-        start = time.time()
         model.train()
         epoch_loss = 0.0
-        correct_train = 0
-        total_train = 0
         
         with tqdm(total = num_training, desc=f"Epoch [{epoch }/{NUM_EPOCHS}]", unit='img') as pbar:
             for i, (inputs, labels) in enumerate(train_loader):
-                _check_channel(img_channels=inputs.shape[1], model_channels=model.n_channels)
+                check_model_image_channel_num(img_channels=inputs.shape[1], model_channels=model.n_channels)
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 # Forward pass
-                # output: (m, output_channel, h, w)
                 outputs = model(inputs)
-                # print(f"output: {outputs.dtype}, labels: {labels.dtype}")
-                # This is because torch.nn.CrossEntropyLoss(reduction='mean') is true, so to simulate a larger batch, we need to further divide
-                # loss = (criterion(outputs, labels) +\
-                #     dice_loss(outputs=outputs, labels=labels.float(), ))/ACCUMULATION_STEPS
                 loss = criterion(outputs, labels) /ACCUMULATION_STEPS
                 pbar.update(inputs.shape[0])
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
@@ -84,17 +56,15 @@ def train_model(model, train_loader,
             epoch_loss /= num_training
             
             current_lr = optimizer.param_groups[0]['lr']
-            # TODO: this is NOT standard practice. We don't have validation set just for a quick PoC
-            # validation_loss = validate_model(model, val_loader, device)
-            # scheduler.step(metrics=validation_loss)  # TODO: disabled for Adam optimizer
-            scheduler.step(metrics=epoch_loss)  # TODO: disabled for Adam optimizer
-            total_grad_norm = get_total_weight_norm(model)
+            scheduler.step(metrics=epoch_loss)
+            total_weight_norm = get_total_weight_norm(model)
             wandb_weight_histogram_logging(model, epoch)
             wandb_logger.log({
                 'epoch loss': epoch_loss,
                 'epoch': epoch,
                 'learning rate': current_lr,
-                'total_grad_norm': total_grad_norm,
+                'total_weight_norm': total_weight_norm,
+                'elapsed_time': timer.lapse_time(),
             })
 
         if SAVE_CHECKPOINT and epoch % SAVE_EVERY_N_EPOCH==0:
@@ -103,37 +73,22 @@ def train_model(model, train_loader,
             file_name = f"unet_epoch_{epoch}.pth"
             torch.save(model.state_dict(), os.path.join(CHECKPOINT_DIR, file_name))
             print(f"Saved model {file_name}")
-    # # eval_model(model, test_loader=test_dataloader, device=device) 
+        
+        if early_stopping(epoch_loss):
+            break
     print('Training complete')
-    return model
+    return epoch
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    # train_dataset = CarvanaDataset(dataset_name="train")
-    train_dataset = GTA5Dataset()
-    
-    # train_dataset = VOCSegmentationClass(image_set='train', year='2007')
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size = BATCH_SIZE,
-        shuffle=True,
-        num_workers = 2,
-        pin_memory = True
-    ) 
-    # val_dataset = VOCSegmentationClass(image_set='val', year='2007')
-    # val_dataloader = torch.utils.data.DataLoader(
-    #     val_dataset,
-    #     batch_size = BATCH_SIZE,
-    #     shuffle=False,  # A bit more deterministic here
-    #     num_workers = 2,
-    #     pin_memory = True
-    # )
+    train_dataset, val_dataset, test_dataset, class_num = get_carvana_datasets()
+    # train_dataset, val_dataset, test_dataset, class_num = get_gta5_datasets()
+    train_dataloader, val_dataloader, test_dataloader = get_data_loader(train_dataset, val_dataset, test_dataset, batch_size=BATCH_SIZE)
+    print(f"Lengths of train_dataset, val_dataset, test_dataset: {len(train_dataset), len(val_dataset), len(test_dataset)}")
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    class_num = len(train_dataset.classes)
     # TODO: let's see this imbalance dataset
     criterion = FocalLoss()
-    # criterion = nn.CrossEntropyLoss()
 
     model = UNet(class_num = class_num, 
                     intermediate_before_max_pool=INTERMEDIATE_BEFORE_MAX_POOL)
@@ -175,7 +130,7 @@ if __name__ == "__main__":
         Optimizer:       {str(optimizer)}
     ''')
     try:
-        train_model(model = model, train_loader = train_dataloader, 
+        epoch = train_model(model = model, train_loader = train_dataloader, 
                     criterion = criterion, 
                     optimizer = optimizer, scheduler = scheduler,
                             NUM_EPOCHS=NUM_EPOCHS, device=device, num_training = len(train_dataset),
@@ -185,11 +140,25 @@ if __name__ == "__main__":
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
         model.use_checkpointing()
-        train_model(model = model, train_loader = train_dataloader, 
+        epoch = train_model(model = model, train_loader = train_dataloader, 
                     criterion = criterion, 
                     optimizer = optimizer, scheduler = scheduler,
                             NUM_EPOCHS=NUM_EPOCHS, device=device, num_training = len(train_dataset),
                             wandb_logger=wandb_logger)
+
+    train_acc, val_acc, test_acc = eval_model(
+        model=model, 
+        train_dataloader=train_dataloader, val_dataloader=val_dataloader, test_dataloader=test_dataloader,
+        device = device,
+        class_num = class_num, visualize = True
+    )
+    # , val_dataloader, test_dataloader, device, class_num, visualize: bool = False) 
+    wandb_logger.log({
+        'Stopped at epoch': epoch,
+        'train accuracy: ': train_acc,
+        'val accuracy: ': val_acc,
+        'test accuracy: ': test_acc,
+    })
 
     # [optional] finish the wandb run, necessary in notebooks                                                                      
     wandb.finish()

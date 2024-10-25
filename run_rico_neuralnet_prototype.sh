@@ -92,11 +92,18 @@ else
         -v $XAUTH:$XAUTH \
         -v /dev:/dev:rw \
         -p 8888:8888 \
+        -w /home/${USER}/${THIS_DIRECTORY_NAME} \
         -itd --rm \
         --runtime nvidia \
         --network=host \
         --privileged \
-        ${IMAGE_NAME}:${TAG_NAME}
+        ${IMAGE_NAME}:${TAG_NAME} /bin/bash -c "\
+    echo 'Creating .inputrc file' && \
+    cat <<EOL > /root/.inputrc
+\"\e[A\": history-search-backward
+\"\e[B\": history-search-forward
+EOL
+    bash"
 fi
 
  #docker run --runtime nvidia -it --rm --network=host -v /home/rico:/home/rico rico_cuda_image:r36.3.0-cu122-torchvision
