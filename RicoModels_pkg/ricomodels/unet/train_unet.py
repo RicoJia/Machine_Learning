@@ -1,39 +1,36 @@
 #! /usr/bin/env python3
-import torch
-from ricomodels.utils.losses import dice_loss, DiceLoss, FocalLoss
-from ricomodels.utils.data_loading import (
-    get_package_dir,
-    get_data_loader,
-    get_gta5_datasets,
-    get_carvana_datasets,
-)
-from ricomodels.utils.training_tools import (
-    check_model_image_channel_num,
-    EarlyStopping,
-    eval_model,
-)
-from ricomodels.unet.unet import UNet
-from ricomodels.utils.visualization import (
-    get_total_weight_norm,
-    wandb_weight_histogram_logging,
-    TrainingTimer,
-)
+import argparse
+import logging
 import os
+
+import torch
+import wandb
+from ricomodels.unet.unet import UNet
+from ricomodels.utils.data_loading import (get_carvana_datasets,
+                                           get_data_loader, get_gta5_datasets,
+                                           get_package_dir)
+from ricomodels.utils.losses import DiceLoss, FocalLoss, dice_loss
+from ricomodels.utils.training_tools import (EarlyStopping,
+                                             check_model_image_channel_num,
+                                             eval_model)
+from ricomodels.utils.visualization import (TrainingTimer,
+                                            get_total_weight_norm,
+                                            wandb_weight_histogram_logging)
 from torch import optim
 from tqdm import tqdm
-import wandb
-import logging
-import argparse
 
+# Input args
+USE_AMP = False
+SAVE_CHECKPOINTS = False
+
+# Configurable contants
 BATCH_SIZE = 8
 MODEL_PATH = os.path.join(get_package_dir(), "unet/unet_pascal.pth")
 CHECKPOINT_DIR = os.path.join(get_package_dir(), "unet/checkpoints")
 ACCUMULATION_STEPS = int(32 / BATCH_SIZE)
 NUM_EPOCHS = 70
 LEARNING_RATE = 1e-5
-SAVE_CHECKPOINT = True
 SAVE_EVERY_N_EPOCH = 5
-USE_AMP = False
 INTERMEDIATE_BEFORE_MAX_POOL = False
 WEIGHT_DECAY = 1e-8
 MOMENTUM = 0.999
@@ -51,7 +48,7 @@ def train_model(
     NUM_EPOCHS,
     device="cpu",
 ):
-    early_stopping = EarlyStopping(delta=1e-5)
+    early_stopping = EarlyStopping(delta=1e-5, patience=3)
     timer = TrainingTimer()
     scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
     device_type = "cuda" if torch.cuda.is_available() else "cpu"
@@ -66,11 +63,12 @@ def train_model(
                 check_model_image_channel_num(
                     img_channels=inputs.shape[1], model_channels=model.n_channels
                 )
+                # outside autocast because labels (long) could have issues with fp16 casting
+                inputs = inputs.to(device)
+                labels = labels.to(device)
                 with torch.autocast(
                     device_type=device_type, dtype=torch.float16, enabled=USE_AMP
                 ):
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
                     # this should be torch.float16 if USE_AMP
                     outputs = model(inputs)
                     # loss is autocast to torch.float32
@@ -92,7 +90,6 @@ def train_model(
                 epoch_loss += loss.item()
 
             epoch_loss /= num_training
-
             current_lr = optimizer.param_groups[0]["lr"]
             scheduler.step(metrics=epoch_loss)
             total_weight_norm = get_total_weight_norm(model)
@@ -107,12 +104,16 @@ def train_model(
                 }
             )
 
-        if SAVE_CHECKPOINT and epoch % SAVE_EVERY_N_EPOCH == 0:
-            if not os.path.exists(CHECKPOINT_DIR):
-                os.mkdir(CHECKPOINT_DIR)
-            file_name = f"unet_epoch_{epoch}.pth"
-            torch.save(model.state_dict(), os.path.join(CHECKPOINT_DIR, file_name))
-            print(f"Saved model {file_name}")
+        if epoch % SAVE_EVERY_N_EPOCH == 0:
+            if SAVE_CHECKPOINTS:
+                if not os.path.exists(CHECKPOINT_DIR):
+                    os.mkdir(CHECKPOINT_DIR)
+                file_name = f"unet_epoch_{epoch}.pth"
+                torch.save(model.state_dict(), os.path.join(CHECKPOINT_DIR, file_name))
+                logging.info(f"Saved model {file_name}")
+            else:
+                torch.save(model.state_dict(), MODEL_PATH)
+                logging.info(f"Saved model {MODEL_PATH}")
 
         if early_stopping(epoch_loss):
             logging.info("Early stopping triggered")
@@ -122,11 +123,31 @@ def train_model(
 
 
 def parse_args():
-    pass
+    """
+    Parse args and set global input args
+    """
+    global USE_AMP, SAVE_CHECKPOINTS
+    parser = argparse.ArgumentParser(description="Set training options")
+    parser.add_argument(
+        "--use_amp",
+        "-u",
+        action="store_true",
+        help="Enable automatic mixed precision (AMP)",
+    )
+    parser.add_argument(
+        "--save_checkpoints",
+        "-s",
+        action="store_true",
+        help="Enable saving model checkpoints",
+    )
+    args = parser.parse_args()
+    USE_AMP = args.use_amp
+    SAVE_CHECKPOINTS = args.save_checkpoints
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    parse_args()
     train_dataset, val_dataset, test_dataset, class_num = get_carvana_datasets()
     # train_dataset, val_dataset, test_dataset, class_num = get_gta5_datasets()
     train_dataloader, val_dataloader, test_dataloader = get_data_loader(
@@ -142,8 +163,6 @@ if __name__ == "__main__":
     model = UNet(
         class_num=class_num, intermediate_before_max_pool=INTERMEDIATE_BEFORE_MAX_POOL
     )
-    # TODO
-    print("norm: ", get_total_weight_norm(model))
     if os.path.exists(MODEL_PATH):
         model.load_state_dict(
             torch.load(MODEL_PATH, weights_only=False, map_location=device)
@@ -174,7 +193,7 @@ if __name__ == "__main__":
             weight_decay=WEIGHT_DECAY,
             training_size=len(train_dataset),
             intermediate_before_max_pool=INTERMEDIATE_BEFORE_MAX_POOL,
-            save_checkpoint=SAVE_CHECKPOINT,
+            save_checkpoint=SAVE_CHECKPOINTS,
             amp=USE_AMP,
             optimizer=str(optimizer),
         )
@@ -187,7 +206,7 @@ if __name__ == "__main__":
         Weight decay:    {WEIGHT_DECAY}
         Training size:   {len(train_dataset)}
         Intermediate_before_max_pool : {INTERMEDIATE_BEFORE_MAX_POOL}
-        Checkpoints:     {SAVE_CHECKPOINT}
+        Save checkpoints:     {SAVE_CHECKPOINTS}
         Device:          {device.type}
         Mixed Precision: {USE_AMP},
         Optimizer:       {str(optimizer)}
