@@ -17,6 +17,7 @@ Pytorch-UNet/
 
 RicoModels_pkg/ricomodels/unet/checkpoints/
 **/wandb/
+**/results/
 
 *.pth
 credentials.json

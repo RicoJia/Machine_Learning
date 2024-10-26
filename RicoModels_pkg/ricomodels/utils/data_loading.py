@@ -8,10 +8,12 @@ from functools import cache, cached_property
 from typing import List, Tuple
 
 import albumentations as A
+# pytorch is a file but not a registered module, so it has to be imported separately
+import albumentations.pytorch as At
+import cv2
 import numpy as np
 import requests
 import torch
-import torchvision
 from PIL import Image
 from torch.utils.data import Dataset, random_split
 from torchvision import datasets, transforms
@@ -19,11 +21,9 @@ from torchvision.transforms import CenterCrop, v2
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-DATA_DIR = "data"
-IGNORE_INDEX = 0
-
 
 def replace_tensor_val(tensor, a, b):
+    # albumentations could pass in extra args
     tensor[tensor == a] = b
     return tensor
 
@@ -40,38 +40,45 @@ def get_package_dir():
         raise FileNotFoundError("Package 'ricomodels' not found")
 
 
-IMAGE_SEG_TRANSFORMS = transforms.Compose(
-    [
-        v2.Resize((256, 256)),
-        v2.ToTensor(),  # to 0-1
-        # v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ]
-)
-TARGET_SEG_TRANSFORMS = transforms.Compose(
-    [
-        v2.Resize((256, 256), interpolation=InterpolationMode.NEAREST),
-        v2.PILToTensor(),
-        v2.Lambda(lambda tensor: tensor.squeeze()),
-        v2.Lambda(lambda x: replace_tensor_val(x.long(), 255, IGNORE_INDEX)),
-    ]
-)
+DATA_DIR = os.path.join(get_package_dir(), "data")
+IGNORE_INDEX = 0
 
 np.random.seed(42)
+# transforms for mask and image
 AUGMENTATION_TRANSFORMS = A.Compose(
     [
+        A.Resize(
+            height=256,
+            width=256,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,
+        ),
         A.HorizontalFlip(p=0.5),
         A.RandomCrop(width=256, height=256),
         A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=30, p=0.5),
         A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
         # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         A.ElasticTransform(p=1.0),
+        A.Lambda(
+            mask=lambda x, **kwargs: replace_tensor_val(x, 255, IGNORE_INDEX).astype(
+                np.int64
+            )
+        ),
+        # need to convert from uint8 to float32
+        # A.Normalize(
+        #     mean=(0.485, 0.456, 0.406),
+        #     std=(0.229, 0.224, 0.225)
+        # ),
+        A.Lambda(image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
+        # Converts to [C, H, W] after all augmentations
+        At.ToTensorV2(transpose_mask=True),
     ]
 )
 
 
 def download_file(url, dest_path, chunk_size=1024):
     """
-    dest_path is the zip file path
+    A generic function for downloading from an url to dest_path
     """
     try:
         response = requests.get(url, stream=True)
@@ -118,9 +125,11 @@ def extract_zip(zip_path, extract_to):
 
 
 class BaseDataset(Dataset):
-    def __init__(
-        self, augmentation, images_dir, labels_dir, manual_find_class_num=False
-    ):
+    """
+    Load data -> applies augmentation on masks and images
+    """
+
+    def __init__(self, images_dir, labels_dir, manual_find_class_num=False):
         self._images_dir = images_dir
         self._labels_dir = labels_dir
         # call this after initializing these variables
@@ -131,7 +140,6 @@ class BaseDataset(Dataset):
         ), "Number of images and labels should be equal."
 
         self._max_class = 0 if manual_find_class_num else None
-        self.augmentation = augmentation
 
     def __len__(self):
         return len(self.images)
@@ -142,19 +150,14 @@ class BaseDataset(Dataset):
         label_path = os.path.join(self._labels_dir, self.labels[idx])
 
         # Open image and label
-        image = Image.open(img_path).convert("RGB")  # Ensure image is in RGB
-        label = Image.open(label_path)
+        image = np.asarray(
+            Image.open(img_path).convert("RGB")
+        )  # Ensure image is in RGB
+        label = np.asarray(Image.open(label_path))
 
-        image = IMAGE_SEG_TRANSFORMS(image)
-        label = TARGET_SEG_TRANSFORMS(label)
-        if self.augmentation:
-            image = np.array(image)
-            label = np.array(label).astype(np.int64)
-            # I hate you the chanel convention mismatches!! Albumentations
-            image = image.transpose(1, 2, 0)
-            augmented = AUGMENTATION_TRANSFORMS(image=image, mask=label)
-            image = augmented["image"]
-            image = image.transpose(2, 0, 1)
+        augmented = AUGMENTATION_TRANSFORMS(image=image, mask=label)
+        image = augmented["image"]
+        label = augmented["mask"]
 
         if self._max_class is not None:
             unique_values = np.unique(label)
@@ -163,7 +166,7 @@ class BaseDataset(Dataset):
 
 
 class GTA5Dataset(BaseDataset):
-    def __init__(self, augmentation):
+    def __init__(self):
         """
         GTA5/
             ├── images/
@@ -215,9 +218,7 @@ class GTA5Dataset(BaseDataset):
                     future.result()
                 except Exception as exc:
                     print(f"An error occurred with {url}: {exc}")
-        super().__init__(
-            augmentation=augmentation, images_dir=images_dir, labels_dir=labels_dir
-        )
+        super().__init__(images_dir=images_dir, labels_dir=labels_dir)
 
     def download_and_extract(self, url, dir_name, zip_name):
         dest_path = os.path.join(dir_name, zip_name)
@@ -233,7 +234,7 @@ class GTA5Dataset(BaseDataset):
 
 
 class CarvanaDataset(BaseDataset):
-    def __init__(self, dataset_name, augmentation):
+    def __init__(self, dataset_name):
         """
         carvana/
             ├── train/
@@ -258,9 +259,7 @@ class CarvanaDataset(BaseDataset):
             get_package_dir(), DATA_DIR, "carvana", dataset_name + "_masks"
         )
 
-        super().__init__(
-            augmentation=augmentation, images_dir=images_dir, labels_dir=labels_dir
-        )
+        super().__init__(images_dir=images_dir, labels_dir=labels_dir)
 
     @cached_property
     def classes(self):
@@ -269,7 +268,14 @@ class CarvanaDataset(BaseDataset):
 
 
 class VOCSegmentationDataset(Dataset):
-    def __init__(self, image_set, year, augmentation):
+    def __init__(self, image_set, year):
+        IMAGE_SET = ("train", "trainval", "val")
+        YEARS = ("2007", "2012")
+        if image_set not in IMAGE_SET:
+            raise ValueError(f"VOC: Image_set '{image_set}' must be one of {IMAGE_SET}")
+        if year not in YEARS:
+            raise ValueError(f"VOC: Year '{year}' must be one of {YEARS}")
+
         self._dataset = datasets.VOCSegmentation(
             root=DATA_DIR,
             year=year,
@@ -277,12 +283,8 @@ class VOCSegmentationDataset(Dataset):
             download=not self._is_extracted(
                 dataset_dir=os.path.join(get_package_dir(), DATA_DIR), year=year
             ),
-            transform=IMAGE_SEG_TRANSFORMS,
-            target_transform=TARGET_SEG_TRANSFORMS,
         )
         self._classes = set()
-        # TODO Remember to remove
-        self.augmentation = augmentation
         print(f"Data {image_set} Successfully Loaded")
 
     def _is_extracted(self, dataset_dir, year):
@@ -306,15 +308,22 @@ class VOCSegmentationDataset(Dataset):
         """
         if len(self._classes) == 0:
             logging.info("Getting VOC classes")
-            for image, target in self._dataset:
+            for _, target in self._dataset:
                 self._classes.update(torch.unique(target).tolist())
         return self._classes
 
     def __getitem__(self, index):
         # return an image and a label. In this case, a label is an image with int8 values
-        # TODO
-        raise NotImplementedError("Need augmentation")
-        return self._dataset[index]
+        image, label = self._dataset[index]
+
+        # Convert to NumPy arrays for Albumentations compatibility
+        image = np.array(image)
+        label = np.array(label)
+
+        augmented = AUGMENTATION_TRANSFORMS(image=image, mask=label)
+        image = augmented["image"]
+        label = augmented["mask"]
+        return image, label
 
     def __len__(self):
         return len(self._dataset)
@@ -365,7 +374,7 @@ def get_data_loader(train_dataset, val_dataset, test_dataset, batch_size):
 
 
 def get_gta5_datasets():
-    main_dataset = GTA5Dataset(augmentation=True)
+    main_dataset = GTA5Dataset()
     train_dataset, val_dataset, test_dataset, class_num = split_dataset(
         main_dataset=main_dataset, train_dev_test_split=[0.8, 0.1, 0.1]
     )
@@ -373,23 +382,33 @@ def get_gta5_datasets():
 
 
 def get_carvana_datasets():
-    main_dataset = CarvanaDataset(dataset_name="train", augmentation=True)
+    main_dataset = CarvanaDataset(
+        dataset_name="train",
+    )
     # Pytorch asks for equal lengths of val and test_datasets
     train_dataset, val_dataset, test_dataset, class_num = split_dataset(
         main_dataset=main_dataset, train_dev_test_split=[0.8, 0.1, 0.1]
     )
-    # test_dataset = CarvanaDataset(dataset_name="test", augmentation = False)
+    # test_dataset = CarvanaDataset(dataset_name="test", )
     return train_dataset, val_dataset, test_dataset, class_num
 
 
 def get_VOC_segmentation_datasets():
+    year = "2012"
     train_dataset = VOCSegmentationDataset(
-        image_set="train", year="2007", augmentation=True
+        image_set="train",
+        year=year,
     )
     val_dataset = VOCSegmentationDataset(
-        image_set="val", year="2007", augmentation=False
+        image_set="trainval",
+        year=year,
     )
-    # TODO
+    test_dataset = VOCSegmentationDataset(
+        image_set="val",
+        year=year,
+    )
+    class_num = len(train_dataset)
+    return train_dataset, val_dataset, test_dataset, class_num
 
 
 if __name__ == "__main__":
@@ -397,7 +416,8 @@ if __name__ == "__main__":
     # eog results/$(ls results/ | head -n1)
     from ricomodels.utils.visualization import visualize_image_target_mask
 
-    dataset = GTA5Dataset(augmentation=True)
+    # dataset = GTA5Dataset()
+    dataset = VOCSegmentationDataset(image_set="train", year="2007")
     for i in range(15):
         image, label = dataset[i]
         img = torch.Tensor(image)

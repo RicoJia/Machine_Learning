@@ -8,7 +8,8 @@ import wandb
 from ricomodels.unet.unet import UNet
 from ricomodels.utils.data_loading import (get_carvana_datasets,
                                            get_data_loader, get_gta5_datasets,
-                                           get_package_dir)
+                                           get_package_dir,
+                                           get_VOC_segmentation_datasets)
 from ricomodels.utils.losses import DiceLoss, FocalLoss, dice_loss
 from ricomodels.utils.training_tools import (EarlyStopping,
                                              check_model_image_channel_num,
@@ -148,7 +149,10 @@ def parse_args():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parse_args()
-    train_dataset, val_dataset, test_dataset, class_num = get_carvana_datasets()
+    train_dataset, val_dataset, test_dataset, class_num = (
+        get_VOC_segmentation_datasets()
+    )
+    # train_dataset, val_dataset, test_dataset, class_num = get_carvana_datasets()
     # train_dataset, val_dataset, test_dataset, class_num = get_gta5_datasets()
     train_dataloader, val_dataloader, test_dataloader = get_data_loader(
         train_dataset, val_dataset, test_dataset, batch_size=BATCH_SIZE

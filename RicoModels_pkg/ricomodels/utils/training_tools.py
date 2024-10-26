@@ -75,6 +75,7 @@ class EarlyStopping:
 def _eval_model(
     model, test_dataloader, device, class_num, visualize: bool = False, msg: str = ""
 ):
+    torch.cuda.empty_cache()
     # Evaluation phase
     num_images = len(test_dataloader)
     model.eval()
@@ -135,7 +136,7 @@ def eval_model(
         model=model,
         test_dataloader=train_dataloader,
         device=device,
-        visualize=visualize,
+        visualize=False,
         class_num=class_num,
         msg="Train Loader",
     )
@@ -143,7 +144,7 @@ def eval_model(
         model=model,
         test_dataloader=val_dataloader,
         device=device,
-        visualize=visualize,
+        visualize=False,
         class_num=class_num,
         msg="Validate Loader",
     )

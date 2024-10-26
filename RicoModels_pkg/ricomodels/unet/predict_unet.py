@@ -1,14 +1,13 @@
 #! /usr/bin/env python3
-import torch
-from ricomodels.utils.data_loading import (
-    get_data_loader,
-    get_gta5_datasets,
-    get_carvana_datasets,
-)
-from ricomodels.utils.training_tools import eval_model
-from ricomodels.unet.train_unet import MODEL_PATH, INTERMEDIATE_BEFORE_MAX_POOL
-from ricomodels.unet.unet import UNet
 import logging
+
+import torch
+from ricomodels.unet.train_unet import INTERMEDIATE_BEFORE_MAX_POOL, MODEL_PATH
+from ricomodels.unet.unet import UNet
+from ricomodels.utils.data_loading import (get_carvana_datasets,
+                                           get_data_loader, get_gta5_datasets,
+                                           get_VOC_segmentation_datasets)
+from ricomodels.utils.training_tools import eval_model
 
 BATCH_SIZE = 16
 
@@ -17,6 +16,7 @@ if __name__ == "__main__":
 
     # train_dataset, val_dataset, test_dataset, class_num = get_gta5_datasets()
     train_dataset, val_dataset, test_dataset, class_num = get_carvana_datasets()
+    # train_dataset, val_dataset, test_dataset, class_num = get_VOC_segmentation_datasets()
     train_dataloader, val_dataloader, test_dataloader = get_data_loader(
         train_dataset, val_dataset, test_dataset, batch_size=BATCH_SIZE
     )
@@ -42,5 +42,5 @@ if __name__ == "__main__":
         test_dataloader=test_dataloader,
         device=device,
         class_num=class_num,
-        visualize=False,
+        visualize=True,
     )
