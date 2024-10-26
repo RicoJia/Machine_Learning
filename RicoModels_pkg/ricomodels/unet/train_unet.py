@@ -25,7 +25,7 @@ USE_AMP = False
 SAVE_CHECKPOINTS = False
 
 # Configurable contants
-BATCH_SIZE = 8
+BATCH_SIZE = 2
 MODEL_PATH = os.path.join(get_package_dir(), "unet/unet_pascal.pth")
 CHECKPOINT_DIR = os.path.join(get_package_dir(), "unet/checkpoints")
 ACCUMULATION_STEPS = int(32 / BATCH_SIZE)

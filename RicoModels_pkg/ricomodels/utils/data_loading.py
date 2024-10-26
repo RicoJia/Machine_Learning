@@ -293,8 +293,8 @@ class VOCSegmentationDataset(Dataset):
         """
         extracted_train_path = os.path.join(
             dataset_dir,
-            "VOCdevkit",
-            f"VOC{year}",
+            # "VOCdevkit",
+            "2012_VOCdevkit/" f"VOC{year}",
             "ImageSets",
             "Segmentation",
             "train.txt",
@@ -362,7 +362,7 @@ def get_data_loader(train_dataset, val_dataset, test_dataset, batch_size):
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
         )
 
@@ -417,7 +417,7 @@ if __name__ == "__main__":
     from ricomodels.utils.visualization import visualize_image_target_mask
 
     # dataset = GTA5Dataset()
-    dataset = VOCSegmentationDataset(image_set="train", year="2007")
+    dataset = VOCSegmentationDataset(image_set="train", year="2012")
     for i in range(15):
         image, label = dataset[i]
         img = torch.Tensor(image)
