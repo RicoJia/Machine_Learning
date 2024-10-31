@@ -16,4 +16,12 @@ RicoModels_pkg/ricomodels/data
 Pytorch-UNet/
 
 RicoModels_pkg/ricomodels/unet/checkpoints/
-RicoModels_pkg/ricomodels/wandb/
+**/wandb/
+**/results/
+
+*.pth
+credentials.json
+token.pickle
+# Files for docker container
+.bashrc
+.inputrc
