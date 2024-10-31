@@ -13,7 +13,7 @@ from ricomodels.utils.data_loading import (get_carvana_datasets,
 from ricomodels.utils.losses import DiceLoss, FocalLoss, dice_loss
 from ricomodels.utils.training_tools import (EarlyStopping,
                                              check_model_image_channel_num,
-                                             eval_model)
+                                             eval_model, parse_args)
 from ricomodels.utils.visualization import (TrainingTimer,
                                             get_total_weight_norm,
                                             wandb_weight_histogram_logging)
@@ -123,32 +123,11 @@ def train_model(
     return epoch
 
 
-def parse_args():
-    """
-    Parse args and set global input args
-    """
-    global USE_AMP, SAVE_CHECKPOINTS
-    parser = argparse.ArgumentParser(description="Set training options")
-    parser.add_argument(
-        "--use_amp",
-        "-u",
-        action="store_true",
-        help="Enable automatic mixed precision (AMP)",
-    )
-    parser.add_argument(
-        "--save_checkpoints",
-        "-s",
-        action="store_true",
-        help="Enable saving model checkpoints",
-    )
-    args = parser.parse_args()
-    USE_AMP = args.use_amp
-    SAVE_CHECKPOINTS = args.save_checkpoints
-
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    parse_args()
+    args = parse_args()
+    USE_AMP = args.use_amp
+    SAVE_CHECKPOINTS = args.save_checkpoints
     train_dataset, val_dataset, test_dataset, class_num = (
         get_VOC_segmentation_datasets()
     )

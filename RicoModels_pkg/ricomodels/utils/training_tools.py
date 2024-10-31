@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import functools
 import logging
 
@@ -9,6 +10,27 @@ from ricomodels.utils.losses import DiceLoss, dice_loss, focal_loss
 from ricomodels.utils.visualization import (get_total_weight_norm,
                                             visualize_image_target_mask)
 from tqdm import tqdm
+
+
+def parse_args():
+    """
+    Parse args and set global input args
+    """
+    parser = argparse.ArgumentParser(description="Set training options")
+    parser.add_argument(
+        "--use_amp",
+        "-u",
+        action="store_true",
+        help="Enable automatic mixed precision (AMP)",
+    )
+    parser.add_argument(
+        "--save_checkpoints",
+        "-s",
+        action="store_true",
+        help="Enable saving model checkpoints",
+    )
+    args = parser.parse_args()
+    return args
 
 
 @functools.cache
@@ -90,6 +112,9 @@ def _eval_model(
             labels_test = labels_test.to(device)
             with torch.autocast(device_type=device_type, dtype=torch.float16):
                 outputs_test = model(inputs_test)
+            # This is for deeplab
+            if "out" in outputs_test:
+                outputs_test = outputs_test["out"]
             _, predicted_test = outputs_test.max(1)
             # Returning an int
             local_total = labels_test.numel()
