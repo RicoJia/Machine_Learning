@@ -21,11 +21,9 @@ from torchvision.transforms import CenterCrop, v2
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
-
-def replace_tensor_val(tensor, a, b):
-    # albumentations could pass in extra args
-    tensor[tensor == a] = b
-    return tensor
+##################################################################
+## IO Functions and Constants
+##################################################################
 
 
 @cache
@@ -38,42 +36,6 @@ def get_package_dir():
         return os.path.dirname(ricomodels_init)
     else:
         raise FileNotFoundError("Package 'ricomodels' not found")
-
-
-DATA_DIR = os.path.join(get_package_dir(), "data")
-IGNORE_INDEX = 0
-
-np.random.seed(42)
-# transforms for mask and image
-AUGMENTATION_TRANSFORMS = A.Compose(
-    [
-        A.Resize(
-            height=256,
-            width=256,
-            interpolation=cv2.INTER_LINEAR,
-            mask_interpolation=cv2.INTER_NEAREST,
-        ),
-        A.HorizontalFlip(p=0.5),
-        A.RandomCrop(width=256, height=256),
-        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=30, p=0.5),
-        A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
-        # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-        A.ElasticTransform(p=1.0),
-        A.Lambda(
-            mask=lambda x, **kwargs: replace_tensor_val(x, 255, IGNORE_INDEX).astype(
-                np.int64
-            )
-        ),
-        # need to convert from uint8 to float32
-        # A.Normalize(
-        #     mean=(0.485, 0.456, 0.406),
-        #     std=(0.229, 0.224, 0.225)
-        # ),
-        A.Lambda(image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
-        # Converts to [C, H, W] after all augmentations
-        At.ToTensorV2(transpose_mask=True),
-    ]
-)
 
 
 def download_file(url, dest_path, chunk_size=1024):
@@ -122,6 +84,65 @@ def extract_zip(zip_path, extract_to):
         print(f"Error: {zip_path} is not a zip file or it is corrupted.")
     except Exception as e:
         print(f"An error occurred while extracting {zip_path}: {e}")
+
+
+DATA_DIR = os.path.join(get_package_dir(), "data")
+IGNORE_INDEX = 0
+
+##################################################################
+## Transforms
+##################################################################
+
+np.random.seed(42)
+# transforms for mask and image
+AUGMENTATION_TRANSFORMS = A.Compose(
+    [
+        A.Resize(
+            height=256,
+            width=256,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,
+        ),
+        A.HorizontalFlip(p=0.5),
+        A.RandomCrop(width=256, height=256),
+        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=30, p=0.5),
+        A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
+        # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        A.ElasticTransform(p=1.0),
+        A.Lambda(
+            mask=lambda x, **kwargs: replace_tensor_val(x, 255, IGNORE_INDEX).astype(
+                np.int64
+            )
+        ),
+        # need to convert from uint8 to float32
+        # A.Normalize(
+        #     mean=(0.485, 0.456, 0.406),
+        #     std=(0.229, 0.224, 0.225)
+        # ),
+        A.Lambda(image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
+        # Converts to [C, H, W] after all augmentations
+        At.ToTensorV2(transpose_mask=True),
+    ]
+)
+
+PREDICTION_PREPROCESS = transforms.Compose(
+    [
+        transforms.Resize((520, 520)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
+
+
+def replace_tensor_val(tensor, a, b):
+    # albumentations could pass in extra args
+    tensor[tensor == a] = b
+    return tensor
+
+
+##################################################################
+## Datasets
+##################################################################
 
 
 class BaseDataset(Dataset):
@@ -329,6 +350,49 @@ class VOCSegmentationDataset(Dataset):
         return len(self._dataset)
 
 
+class PredictionDataset(Dataset):
+    def __init__(self, dataset_path=""):
+        if not dataset_path:
+            dataset_path = os.path.join(get_package_dir(), "data/prediction_images")
+        image_files = [
+            f
+            for f in os.listdir(dataset_path)
+            if f.lower().endswith((".png", ".jpg", ".jpeg"))
+        ]
+
+        logging.info(
+            f"Dataset path: {dataset_path}, number of images: {len(image_files)}"
+        )
+        self._original_images = []
+        self._input_batches = []
+        with tqdm(
+            desc=f"Loading: ",
+            total=len(image_files),
+            unit="im",
+            unit_scale=False,
+            unit_divisor=1,
+        ) as bar:
+            for img_file in image_files:
+                img_path = os.path.join(dataset_path, img_file)
+                input_batch, original_image = self.load_image(img_path)
+                self._original_images.append(original_image)
+                self._input_batches.append(input_batch)
+                bar.update(1)
+
+    def load_image(self, image_path, preprocess=PREDICTION_PREPROCESS):
+        image = Image.open(image_path).convert("RGB")
+        input_tensor: torch.Tensor = preprocess(image)
+        input_batch = input_tensor.unsqueeze(0)
+        return input_batch, input_tensor
+
+    def __len__(self):
+        return len(self._input_batches)
+
+    def __getitem__(self, index):
+        image, batch = self._original_images[index], self._input_batches[index]
+        return image, batch
+
+
 ##################################################################
 ## Tool Functions
 ##################################################################
@@ -412,13 +476,16 @@ def get_VOC_segmentation_datasets():
 
 
 if __name__ == "__main__":
-    # rm -rf results/ && python3 data_loading.py && mv /tmp/results/ .
-    # eog results/$(ls results/ | head -n1)
-    from ricomodels.utils.visualization import visualize_image_target_mask
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    # # rm -rf results/ && python3 data_loading.py && mv /tmp/results/ .
+    # # eog results/$(ls results/ | head -n1)
+    # from ricomodels.utils.visualization import visualize_image_target_mask
 
-    # dataset = GTA5Dataset()
-    dataset = VOCSegmentationDataset(image_set="train", year="2012")
-    for i in range(15):
-        image, label = dataset[i]
-        img = torch.Tensor(image)
-        visualize_image_target_mask(img, target=None, labels=label)
+    # # dataset = GTA5Dataset()
+    # dataset = VOCSegmentationDataset(image_set="train", year="2012")
+    # for i in range(15):
+    #     image, label = dataset[i]
+    #     img = torch.Tensor(image)
+    #     visualize_image_target_mask(img, target=None, labels=label)
+
+    dataset = PredictionDataset()
