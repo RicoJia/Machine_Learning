@@ -1,4 +1,6 @@
-# jetson-containers build --name=rico_cuda_image jupyterlab pytorch torchvision
+# jetson-containers build --name=rico_cuda_image jupyterlab pytorch torchvision ros:iron-desktop
+# On desktop, it's equivalent to rwthika/ros2-ml
+# docker exec -it ros2-image-processing-rico-container bash
 show_help(){
   echo "Usage: $0 [-j] [-h]"
   echo
@@ -30,9 +32,21 @@ ls -FAlh $XAUTH
 echo ""
 echo "Running docker..."
 
-# IMAGE_NAME=ros2-image-processing-rico
-IMAGE_NAME=rico_cuda_image
-TAG_NAME=r36.3.0
+DESKTOP_IMAGE_NAME=ros2-image-processing-rico
+ORIN_IMAGE_NAME=rico_cuda_image
+ARCHITECTURE=$(dpkg --print-architecture)
+
+# Check if the CUDA image exists by trying to retrieve its ID
+if [ "$ARCHITECTURE" == "amd64" ] || [ "$ARCHITECTURE" == "x86_64" ]; then
+    IMAGE_NAME="$DESKTOP_IMAGE_NAME"
+    TAG_NAME=latest
+else
+    IMAGE_NAME="$ORIN_IMAGE_NAME"
+    TAG_NAME=r36.3.0
+fi
+
+echo "Launching image ${IMAGE_NAME}:${TAG_NAME}"
+
 THIS_DIRECTORY_PATH="$(dirname "${BASH_SOURCE[0]}")"
 THIS_DIRECTORY_NAME="$(basename "$(dirname "${BASH_SOURCE[0]}")")"
 # Add this for nvidia 
