@@ -6,6 +6,7 @@ import torch.backends.cudnn as cudnn  # CUDA Deep Neural Network Library
 import torch.nn as nn
 import torch.optim as optim
 import torchvision
+from torchsummary import summary
 
 
 class ConvBNReLu6(nn.Sequential):
@@ -35,6 +36,7 @@ class ConvBNReLu6(nn.Sequential):
                 padding=0,
                 dilation=dilation,
                 groups=groups,
+                bias = False,
             ),
             nn.BatchNorm2d(out_channels),
         ]
@@ -101,7 +103,7 @@ class InvertedBottleneckResidualBlock(nn.Module):
                 groups=hidden_dim,
                 have_relu=have_relu,
             ),
-            nn.Conv2d(hidden_dim, out_channels, kernel_size=1),
+            nn.Conv2d(hidden_dim, out_channels, kernel_size=1, bias=False),
             nn.BatchNorm2d(out_channels),
         ]
 
@@ -129,6 +131,7 @@ class MobileNetV2(nn.Module):
         num_classes=1000,
         output_stride=8,
     ):
+        super().__init__()
         input_channel = 32
         self.output_dim = 1280
 
@@ -143,9 +146,10 @@ class MobileNetV2(nn.Module):
             [6, 320, 1, 1],
         ]
 
+        # stride = 2 is from mobilenet v2
         layers = [
             ConvBNReLu6(
-                3, first_hidden_dim, kernel_size=3, stride=output_stride, have_relu=True
+                3, input_channel, kernel_size=3, stride=2, have_relu=True
             )
         ]
         dilation = 1
@@ -163,7 +167,7 @@ class MobileNetV2(nn.Module):
                 if i == 0:
                     layers.append(
                         InvertedBottleneckResidualBlock(
-                            input_channels=input_channel,
+                            in_channels=input_channel,
                             out_channels=output_channel,
                             stride=stride,
                             dilation=previous_dilation,
@@ -179,6 +183,7 @@ class MobileNetV2(nn.Module):
                             stride=1,
                             dilation=dilation,
                             expansion_factor=expansion_factor,
+                            have_relu=True
                         )
                     )
                 input_channel = output_channel
@@ -223,3 +228,5 @@ class MobileNetV2(nn.Module):
 if __name__ == "__main__":
     output_stride = 4
     mobilenet_v2 = MobileNetV2(output_stride=output_stride)
+    # this is from torchsummary
+    print(mobilenet_v2)
