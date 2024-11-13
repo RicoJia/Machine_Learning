@@ -1,8 +1,10 @@
-import pytest
-import pprint
 import json
 import os
+import pprint
+
 import numpy as np
+import pytest
+
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
@@ -18,18 +20,21 @@ def pytest_runtest_makereport(item, call):
     # be "setup", "call", "teardown"
     setattr(item, "rep_" + rep.when, rep)
 
+
 def load_json(json_path):
     if not os.path.isfile(json_path):
         return {}
-    with open(json_path, 'r') as f:
+    with open(json_path, "r") as f:
         data = json.load(f)
     return data
 
+
 def save_json(data, json_path):
-    with open(json_path, 'w') as f:
+    with open(json_path, "w") as f:
         json.dump(data, f, indent=4)
 
-@pytest.fixture(scope='function', autouse=True)
+
+@pytest.fixture(scope="function", autouse=True)
 def log_test_result(request):
     """
     This function logs the result of each test case to tests/test_result.json.
@@ -38,25 +43,26 @@ def log_test_result(request):
     for the submission.
     """
     yield
-    test_result = load_json('tests/test_result.json')
+    test_result = load_json("tests/test_result.json")
     test_passed = not request.node.rep_call.failed
     test_result[request.node.name] = test_passed
-    save_json(test_result, 'tests/test_result.json')
+    save_json(test_result, "tests/test_result.json")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def grade_assignment(request):
     """
     This is the autograder. It works by checking the results of each test case
     (kept in tests/test_result.json), looking up the weight for each test case
-    in tests/rubric.json. The output of the autograder is printed to the 
-    command line and logged to tests/rubric.json. 
+    in tests/rubric.json. The output of the autograder is printed to the
+    command line and logged to tests/rubric.json.
 
     tests/rubric.json has the following structure:
     {
         "name_of_test_case": {
             "weight": relative_weight_for_test_case_in_grading,
             "depends": [
-                "list_of", 
+                "list_of",
                 "test_case_names",
                 "that_this",
                 "test_case",
@@ -65,7 +71,7 @@ def grade_assignment(request):
         }
     }
 
-    weight can be a float or an int, or it can be "required", a special string. 
+    weight can be a float or an int, or it can be "required", a special string.
     When the test case is "required", the grade for the assignment is a 0 unless
     the given test case is passed. This can be used when checking for disallowed
     imports (e.g. importing sklearn to implement the assignment). The list kept
@@ -91,7 +97,7 @@ def grade_assignment(request):
         }
     }
 
-    It also prints to the console (this may not be seen if all tests passed), 
+    It also prints to the console (this may not be seen if all tests passed),
     which looks like this:
 
         Output of autograder
@@ -112,56 +118,46 @@ def grade_assignment(request):
 
     Run this autograder by running the following in the project's root directory.
         python -m pytest
-    
+
     To run a specific test, run:
         python -m pytest -k test_load_data
 
-    The score assigned by the autograder will be the grade, unless plagiarism or 
+    The score assigned by the autograder will be the grade, unless plagiarism or
     other disqualifying behavior is discovered.
     """
     yield
-    test_result = load_json('tests/test_result.json')
-    rubric = load_json('tests/rubric.json')
-    report = {
-        'score': 0,
-        'tests_passed': 0,
-        'notes': {}
-    }
+    test_result = load_json("tests/test_result.json")
+    rubric = load_json("tests/rubric.json")
+    report = {"score": 0, "tests_passed": 0, "notes": {}}
     total = 0
     tests_passed = 0
     total_tests = 0
 
     for name, result in test_result.items():
         if name in rubric:
-            if rubric[name]['weight'] == 'required':
+            if rubric[name]["weight"] == "required":
                 if not result:
-                    report['score'] = 0
-                    report['notes'][name] = (
-                        f'FAIL - REQUIRED (automatic zero)'
-                    )
+                    report["score"] = 0
+                    report["notes"][name] = f"FAIL - REQUIRED (automatic zero)"
                     total = 1
                     total_tests = 1
                     break
             else:
                 dependencies_satisifed = True
-                for dependency in rubric[name]['depends']:
+                for dependency in rubric[name]["depends"]:
                     if not test_result[dependency]:
                         dependencies_satisifed = False
-                
+
                 if result and dependencies_satisifed:
-                    report['score'] += rubric[name]['weight']
-                    report['tests_passed'] += 1
-                    report['notes'][name] = (
-                        f'PASS'
-                    )
+                    report["score"] += rubric[name]["weight"]
+                    report["tests_passed"] += 1
+                    report["notes"][name] = f"PASS"
                 else:
-                    report['notes'][name] = (
-                        f'FAIL'
-                    )
-                total += rubric[name]['weight']
+                    report["notes"][name] = f"FAIL"
+                total += rubric[name]["weight"]
                 total_tests += 1
 
-    report['score'] = int(np.ceil(100 * report['score'] / total))
+    report["score"] = int(np.ceil(100 * report["score"] / total))
     print(
         f"\n======================\n"
         f"Output of autograder\n"
@@ -170,7 +166,7 @@ def grade_assignment(request):
         f"Overall score:\t{report['score']}/{100}"
     )
     print("======================")
-    for i, note in report['notes'].items():
-        print(f'{note} {i}')
+    for i, note in report["notes"].items():
+        print(f"{note} {i}")
     print("======================")
-    save_json(report, 'tests/report.json')
+    save_json(report, "tests/report.json")

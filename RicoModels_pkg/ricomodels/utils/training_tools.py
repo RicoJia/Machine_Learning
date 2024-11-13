@@ -6,8 +6,10 @@ import logging
 import numpy as np
 import torch
 from ricomodels.utils.losses import DiceLoss, dice_loss, focal_loss
-from ricomodels.utils.visualization import (get_total_weight_norm,
-                                            visualize_image_target_mask)
+from ricomodels.utils.visualization import (
+    get_total_weight_norm,
+    visualize_image_target_mask,
+)
 from tqdm import tqdm
 
 

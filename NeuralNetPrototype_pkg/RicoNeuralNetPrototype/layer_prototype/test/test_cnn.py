@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-
 from RicoNeuralNetPrototype.layer_prototype.cnn import (
     SGD,
     Conv2d,

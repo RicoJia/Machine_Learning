@@ -70,58 +70,79 @@ class QLearning:
         """
         S = env.observation_space.n
         A = env.action_space.n
-        state_action_values = np.zeros((S,A))       #each action's number is also the index of the action. This is an S x A matrix
-        action_counts = np.zeros((S,A))                 #number of executions of each action. S x A matrux
+        state_action_values = np.zeros(
+            (S, A)
+        )  # each action's number is also the index of the action. This is an S x A matrix
+        action_counts = np.zeros(
+            (S, A)
+        )  # number of executions of each action. S x A matrux
 
-        epsilon_count = 0       #counting epsilon, so every time it hits the bound, it will draw a random action, (not using argmax!)
-        epsilon_count_bound = np.floor(1.0/self.epsilon)      #this might be adaptive
+        epsilon_count = 0  # counting epsilon, so every time it hits the bound, it will draw a random action, (not using argmax!)
+        epsilon_count_bound = np.floor(1.0 / self.epsilon)  # this might be adaptive
 
-        rewards= np.zeros(100)              #average rewards for every s steps.
-        reward_index = 0      #upper bound is np.floor(steps / 100)
-        count_rewards = 1       #for calculating the average in rewards
+        rewards = np.zeros(100)  # average rewards for every s steps.
+        reward_index = 0  # upper bound is np.floor(steps / 100)
+        count_rewards = 1  # for calculating the average in rewards
 
-        observation = env.reset()       #TODO: not sure if we should reset the environment just once, since we are not doing episodes?
+        observation = (
+            env.reset()
+        )  # TODO: not sure if we should reset the environment just once, since we are not doing episodes?
 
-        for n in range(0, steps):          #this is one huge episode. n is [1...steps]
+        for n in range(0, steps):  # this is one huge episode. n is [1...steps]
             env.render()
 
-            #get action
+            # get action
             if self.adaptive == True:
-                _epsilon = self._adaptive_epsilon( float(n)/steps )
-                epsilon_count_bound = np.floor(1.0/_epsilon)
+                _epsilon = self._adaptive_epsilon(float(n) / steps)
+                epsilon_count_bound = np.floor(1.0 / _epsilon)
 
             if epsilon_count != epsilon_count_bound:
-                if np.array_equal(state_action_values[observation,:], np.zeros(A)):
-                    action = np.random.randint(0,A)
+                if np.array_equal(state_action_values[observation, :], np.zeros(A)):
+                    action = np.random.randint(0, A)
                     # print("all zero actions!")
                 else:
-                    action = np.argmax(state_action_values[observation,:])            #assume observation is updated and it is the same as the row number
+                    action = np.argmax(
+                        state_action_values[observation, :]
+                    )  # assume observation is updated and it is the same as the row number
                 epsilon_count += 1
             else:
-                action = np.random.randint(0,A-1)
+                action = np.random.randint(0, A - 1)
                 epsilon_count = 0
                 # print("randomized!")
 
-            next_observation, reward, done, info = env.step(action)             #TODO: don't forget to update observation
+            next_observation, reward, done, info = env.step(
+                action
+            )  # TODO: don't forget to update observation
 
-
-            #update state_action_values
+            # update state_action_values
             action_counts[observation, action] += 1
-            state_action_values[observation,action] += 1.0/action_counts[observation, action] * (reward + self.discount * np.max(state_action_values[next_observation,:]) - state_action_values[observation, action])       #TODO
+            state_action_values[observation, action] += (
+                1.0
+                / action_counts[observation, action]
+                * (
+                    reward
+                    + self.discount * np.max(state_action_values[next_observation, :])
+                    - state_action_values[observation, action]
+                )
+            )  # TODO
 
-            #update rewards
-            if count_rewards < np.floor(steps / 100.0):     #the same s steps
-                rewards[reward_index] += 1.0/count_rewards * ( reward - rewards[reward_index]  )
-                count_rewards+=1
-            else:       #starting a new sequence of s steps
+            # update rewards
+            if count_rewards < np.floor(steps / 100.0):  # the same s steps
+                rewards[reward_index] += (
+                    1.0 / count_rewards * (reward - rewards[reward_index])
+                )
+                count_rewards += 1
+            else:  # starting a new sequence of s steps
                 reward_index += 1
                 count_rewards = 1
                 if reward_index < 100:
-                    rewards[reward_index] += 1.0/count_rewards * ( reward - rewards[reward_index]  )
+                    rewards[reward_index] += (
+                        1.0 / count_rewards * (reward - rewards[reward_index])
+                    )
 
             observation = next_observation
 
-            if done == True: #not game over
+            if done == True:  # not game over
                 observation = env.reset()
 
         env.close()
@@ -167,7 +188,7 @@ class QLearning:
         actions = np.array([])
         rewards = np.array([])
         done = False
-        while done==False:     #not at the terminal yet
+        while done == False:  # not at the terminal yet
             env.render()
             action = np.argmax(state_action_values[state])
             state, reward, done, info = env.step(action)
@@ -176,7 +197,6 @@ class QLearning:
             rewards = np.append(rewards, reward)
 
         return states, actions, rewards
-
 
     def _get_epsilon(self, progress):
         """
@@ -203,4 +223,3 @@ class QLearning:
                 training progess. Equivalent to current_step / steps.
         """
         return (1.0 - progress) * self.epsilon
-

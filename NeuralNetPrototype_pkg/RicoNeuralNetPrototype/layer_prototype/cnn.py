@@ -8,9 +8,10 @@ import scipy.signal
 
 def he_init_cnn(out_channels, in_channels, kernel_size):
     # For ReLU, this is for [output_channels, input_channels, kernel, kernel]
-    return (np.random.randn(out_channels, in_channels, *kernel_size) * np.sqrt(
-        2 / in_channels
-    )).astype(np.float32)
+    return (
+        np.random.randn(out_channels, in_channels, *kernel_size)
+        * np.sqrt(2 / in_channels)
+    ).astype(np.float32)
 
 
 def he_init(shape):
@@ -215,7 +216,7 @@ class Conv2d(RicoCalculationLayer):
         ).astype(int)
         self.output = np.zeros(
             [batch_num, out_channel_num, output_size[0], output_size[1]],
-            dtype=np.float32
+            dtype=np.float32,
         )
 
         if x.shape[1] != input_channel_num:
@@ -245,7 +246,9 @@ class Conv2d(RicoCalculationLayer):
         self.output_gradient = output_gradient.astype(np.float32)
         self.input_gradient = np.zeros(self.input.shape, dtype=np.float32)
         # in this case, weights is kernel
-        self.weights_gradient = np.zeros(self.weights.shape, dtype=np.float32)  # delJ/delK
+        self.weights_gradient = np.zeros(
+            self.weights.shape, dtype=np.float32
+        )  # delJ/delK
 
         batch_num = self.input.shape[0]
         for b in range(batch_num):
@@ -286,6 +289,7 @@ class Linear(RicoCalculationLayer):
         ).T  # [output_size, input_size], after summing up all batches
         self.bias_gradient = np.sum(output_gradient, axis=0).reshape(self.bias.shape)
         return self.input_gradient
+
 
 ################################
 # Optimizer

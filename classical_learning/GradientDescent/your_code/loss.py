@@ -96,13 +96,13 @@ class SquaredLoss(Loss):
         loss = 0.0
         N = len(X)
         for i in range(N):
-            loss +=  (y[i] - w.T.dot(X[i, :]))**2
+            loss += (y[i] - w.T.dot(X[i, :])) ** 2
 
-        regularization = self.regularization.forward(w=w) if self.regularization!=None else 0.0
+        regularization = (
+            self.regularization.forward(w=w) if self.regularization != None else 0.0
+        )
 
-        return 1.0/(2.0 * N) * loss + regularization
-
-
+        return 1.0 / (2.0 * N) * loss + regularization
 
     def backward(self, X, w, y):
         """
@@ -127,8 +127,10 @@ class SquaredLoss(Loss):
         d_1 = X.shape[1]
         N = len(X)
         for i in range(N):
-            loss += -1.0/N * (y[i] - w.T.dot(X[i,:])) * X[i,:]
-        return loss + (self.regularization.backward(w=w) if self.regularization else np.zeros(d_1))
+            loss += -1.0 / N * (y[i] - w.T.dot(X[i, :])) * X[i, :]
+        return loss + (
+            self.regularization.backward(w=w) if self.regularization else np.zeros(d_1)
+        )
 
 
 class HingeLoss(Loss):
@@ -169,13 +171,15 @@ class HingeLoss(Loss):
 
         sum = 0.0
         for i in range(X.shape[0]):
-            product = y[i] * w.T.dot(X[i,:])
-            sum += max(0, 1-product)
+            product = y[i] * w.T.dot(X[i, :])
+            sum += max(0, 1 - product)
 
-        regularization = self.regularization.forward(w=w) if self.regularization!=None else 0.0
+        regularization = (
+            self.regularization.forward(w=w) if self.regularization != None else 0.0
+        )
         # import pdb; pdb.set_trace()
 
-        return sum * 1.0/N + regularization
+        return sum * 1.0 / N + regularization
 
     def backward(self, X, w, y):
         """
@@ -202,7 +206,11 @@ class HingeLoss(Loss):
         for i in range(len(X)):
             gradient = -y[i] * X[i, :]
             # sum += 1.0/N * gradient * ( 1.0 - y[i] * w.T.dot(X[i, :]) > 0)
-            regularization =  self.regularization.backward(w=w) if self.regularization else np.zeros(d_1)
+            regularization = (
+                self.regularization.backward(w=w)
+                if self.regularization
+                else np.zeros(d_1)
+            )
 
             # if y[i] * w.T.dot(X[i, :]) < 0:
             #     multiplier = 1
@@ -211,11 +219,10 @@ class HingeLoss(Loss):
             #
             # pure_gradient = gradient * multiplier
 
-            pure_gradient = gradient * ( 1.0 - y[i] * w.T.dot(X[i, :]) > 0)
+            pure_gradient = gradient * (1.0 - y[i] * w.T.dot(X[i, :]) > 0)
             sum = sum + pure_gradient
 
-        return sum*1.0/N + regularization
-
+        return sum * 1.0 / N + regularization
 
 
 class ZeroOneLoss(Loss):
@@ -276,4 +283,4 @@ class ZeroOneLoss(Loss):
                 the bias term.
         """
         # This function purposefully left blank
-        raise ValueError('No need to use this function for the homework :p')
+        raise ValueError("No need to use this function for the homework :p")

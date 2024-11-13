@@ -1,10 +1,11 @@
-import numpy as np 
+import numpy as np
+
 
 def euclidean_distances(X, Y):
-    """Compute pairwise Euclidean distance between the rows of two matrices X (shape MxK) 
+    """Compute pairwise Euclidean distance between the rows of two matrices X (shape MxK)
     and Y (shape NxK). The output of this function is a matrix of shape MxN containing
     the Euclidean distance between two rows.
-    
+
     Arguments:
         X {np.ndarray} -- First matrix, containing M examples with K features each.
         Y {np.ndarray} -- Second matrix, containing N examples with K features each.
@@ -12,23 +13,21 @@ def euclidean_distances(X, Y):
     Returns:
         D {np.ndarray}: MxN matrix with Euclidean distances between rows of X and rows of Y.
     """
-    D = np.empty((0,Y.shape[0]))
+    D = np.empty((0, Y.shape[0]))
     for row_x in X:
         D_row = np.array([])
         for row_y in Y:
-            d = np.linalg.norm(row_x-row_y)
+            d = np.linalg.norm(row_x - row_y)
             D_row = np.append(D_row, d)
         D = np.vstack((D, D_row))
     return D
 
 
-
-
 def manhattan_distances(X, Y):
-    """Compute pairwise Manhattan distance between the rows of two matrices X (shape MxK) 
+    """Compute pairwise Manhattan distance between the rows of two matrices X (shape MxK)
     and Y (shape NxK). The output of this function is a matrix of shape MxN containing
     the Manhattan distance between two rows.
-    
+
     Arguments:
         X {np.ndarray} -- First matrix, containing M examples with K features each.
         Y {np.ndarray} -- Second matrix, containing N examples with K features each.
@@ -36,21 +35,21 @@ def manhattan_distances(X, Y):
     Returns:
         D {np.ndarray}: MxN matrix with Manhattan distances between rows of X and rows of Y.
     """
-    D = np.empty((0,Y.shape[0]))
+    D = np.empty((0, Y.shape[0]))
     for row_x in X:
         D_row = np.array([])
         for row_y in Y:
-            d = abs(row_x-row_y).sum()
+            d = abs(row_x - row_y).sum()
             D_row = np.append(D_row, d)
         D = np.vstack((D, D_row))
     return D
 
 
 def cosine_distances(X, Y):
-    """Compute Cosine distance between the rows of two matrices X (shape MxK) 
+    """Compute Cosine distance between the rows of two matrices X (shape MxK)
     and Y (shape NxK). The output of this function is a matrix of shape MxN containing
     the Cosine distance between two rows.
-    
+
     Arguments:
         X {np.ndarray} -- First matrix, containing M examples with K features each.
         Y {np.ndarray} -- Second matrix, containing N examples with K features each.
@@ -58,11 +57,11 @@ def cosine_distances(X, Y):
     Returns:
         D {np.ndarray}: MxN matrix with Cosine distances between rows of X and rows of Y.
     """
-    D = np.empty((0,Y.shape[0]))
+    D = np.empty((0, Y.shape[0]))
     for row_x in X:
         D_row = np.array([])
         for row_y in Y:
-            d = 1- (row_x.dot(row_y))/ np.linalg.norm(row_x)/np.linalg.norm(row_y)
+            d = 1 - (row_x.dot(row_y)) / np.linalg.norm(row_x) / np.linalg.norm(row_y)
             D_row = np.append(D_row, d)
 
             # print ("---------------")

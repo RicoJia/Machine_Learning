@@ -1,6 +1,7 @@
 import numpy as np
 
-class KMeans():
+
+class KMeans:
     def __init__(self, n_clusters):
         """
         This class implements the traditional KMeans algorithm with hard assignments:
@@ -36,12 +37,14 @@ class KMeans():
         Returns:
             None (saves model - means - internally)
         """
-        self.means = self.init_means(features)      #(m, n_features)
-        self.label_arr = np.array([])           #[n_samples]
-        while True:                 # assume the model will converge
-            self.cluster_dist = self.get_dist_to_mean(features)        #3D array (feature_num, mean_num)
+        self.means = self.init_means(features)  # (m, n_features)
+        self.label_arr = np.array([])  # [n_samples]
+        while True:  # assume the model will converge
+            self.cluster_dist = self.get_dist_to_mean(
+                features
+            )  # 3D array (feature_num, mean_num)
             label_arr = self.label_features()
-            if len(self.label_arr) != 0:  #if you're initializing it. update means
+            if len(self.label_arr) != 0:  # if you're initializing it. update means
                 if np.array_equal(self.label_arr, label_arr):
                     break
             self.label_arr = label_arr
@@ -49,21 +52,27 @@ class KMeans():
 
     def update_means(self, features):
         """
-        Update means after gettting new labels for each feature. 
+        Update means after gettting new labels for each feature.
         Args:
             features (np.ndarray): array containing inputs of size
             (n_samples, n_features).
-        Return: 
+        Return:
              means [ num_means, n_features ]
         """
-        #TODO
+        # TODO
         means = np.copy(self.means)
         for i_mean in range(self.n_clusters):
             mean = means[i_mean, :]
-            cluster = np.array( [ features[i, :] for i in range(features.shape[0]) if self.label_arr[i] == i_mean ] )
+            cluster = np.array(
+                [
+                    features[i, :]
+                    for i in range(features.shape[0])
+                    if self.label_arr[i] == i_mean
+                ]
+            )
 
-            for i_cln_mean in range(means.shape[1]):   #every column in mean
-                means[i_mean, i_cln_mean] = np.mean(cluster[:, i_cln_mean] )
+            for i_cln_mean in range(means.shape[1]):  # every column in mean
+                means[i_mean, i_cln_mean] = np.mean(cluster[:, i_cln_mean])
 
         return means
 
@@ -73,9 +82,9 @@ class KMeans():
         Return: table of labels (mean index) [num_feature]
         """
         label_arr = np.zeros((self.cluster_dist.shape[0]))
-        for i_feature in range( self.cluster_dist.shape[0] ):
+        for i_feature in range(self.cluster_dist.shape[0]):
             label_arr[i_feature] = np.argmin(self.cluster_dist[i_feature, :])
-        return  label_arr
+        return label_arr
 
     def get_dist_to_mean(self, features):
         """
@@ -89,7 +98,9 @@ class KMeans():
         cluster_dist = np.zeros((features.shape[0], self.means.shape[0]))
         for i_feature in range(features.shape[0]):
             for i_mean in range(self.means.shape[0]):
-                cluster_dist[i_feature, i_mean] = np.linalg.norm((features[i_feature,:] - self.means[i_mean, :]))
+                cluster_dist[i_feature, i_mean] = np.linalg.norm(
+                    (features[i_feature, :] - self.means[i_mean, :])
+                )
 
         return cluster_dist
 
@@ -104,8 +115,10 @@ class KMeans():
 
         index_arr = np.arange(features.shape[0])
         np.random.shuffle(index_arr)
-        random_mean_index_arr = index_arr[:self.n_clusters]  #we assume n_clusters is way smaller than the feature space dimension
-        means = np.array([ features[i, :] for i in random_mean_index_arr ])
+        random_mean_index_arr = index_arr[
+            : self.n_clusters
+        ]  # we assume n_clusters is way smaller than the feature space dimension
+        means = np.array([features[i, :] for i in random_mean_index_arr])
         return means
 
     def predict(self, features):
@@ -121,13 +134,13 @@ class KMeans():
                 of size (n_samples,). Each element of the array is the index of the
                 cluster the sample belongs to.
         """
-        label_arr = np.zeros( features.shape[0] )
+        label_arr = np.zeros(features.shape[0])
 
-        for i_feature in range( features.shape[0] ):
+        for i_feature in range(features.shape[0]):
             feature = features[i_feature, :]
-            means = np.zeros( self.n_clusters )
-            for i_mean in range( self.n_clusters ):
-                means[i_mean] = np.linalg.norm( self.means[i_mean,:] - feature)
+            means = np.zeros(self.n_clusters)
+            for i_mean in range(self.n_clusters):
+                means[i_mean] = np.linalg.norm(self.means[i_mean, :] - feature)
 
             label_arr[i_feature] = np.argmin(means)
 

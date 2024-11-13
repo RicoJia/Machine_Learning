@@ -62,53 +62,66 @@ class MultiArmedBandit:
         """
         S = env.observation_space.n
         A = env.action_space.n
-        state_action_values = np.zeros((S,A))       #each action's number is also the index of the action. This is an 1*m matrix
-        action_counts = np.zeros((S,A))                 #number of executions of each action.
-        epsilon_count = 0       #counting epsilon
-        epsilon_count_bound = np.floor(1.0/self.epsilon)      #
+        state_action_values = np.zeros(
+            (S, A)
+        )  # each action's number is also the index of the action. This is an 1*m matrix
+        action_counts = np.zeros((S, A))  # number of executions of each action.
+        epsilon_count = 0  # counting epsilon
+        epsilon_count_bound = np.floor(1.0 / self.epsilon)  #
 
-        rewards= np.zeros(100)
-        reward_index = 0      #upper bound is np.floor(steps / 100)
-        count_rewards = 1       #for calculating the average in rewards
+        rewards = np.zeros(100)
+        reward_index = 0  # upper bound is np.floor(steps / 100)
+        count_rewards = 1  # for calculating the average in rewards
 
         observation = env.reset()
-        for n in range(0, steps):          #this is one huge episode. n is [1...steps]
+        for n in range(0, steps):  # this is one huge episode. n is [1...steps]
             env.render()
 
             if epsilon_count != epsilon_count_bound:
-                if np.array_equal(state_action_values[observation,:], np.zeros(A)):
-                    action = np.random.randint(0,A)
+                if np.array_equal(state_action_values[observation, :], np.zeros(A)):
+                    action = np.random.randint(0, A)
                     # print("all zero actions!")
                 else:
-                    action = np.argmax(state_action_values[observation,:])            #assume observation is updated and it is the same as the row number
+                    action = np.argmax(
+                        state_action_values[observation, :]
+                    )  # assume observation is updated and it is the same as the row number
                 epsilon_count += 1
             else:
-                action = np.random.randint(0,A)
+                action = np.random.randint(0, A)
                 epsilon_count = 0
 
-            next_observation, reward, done, info = env.step(action)             #TODO: don't forget to update observation
+            next_observation, reward, done, info = env.step(
+                action
+            )  # TODO: don't forget to update observation
 
-            #update state_action_values
+            # update state_action_values
             action_counts[observation, action] += 1
-            state_action_values[observation,action] += 1.0/action_counts[observation, action] * (reward - state_action_values[observation, action])       #TODO
+            state_action_values[observation, action] += (
+                1.0
+                / action_counts[observation, action]
+                * (reward - state_action_values[observation, action])
+            )  # TODO
 
-            #update rewards
-            if count_rewards < np.floor(steps / 100.0):     #the same s steps
-                rewards[reward_index] += 1.0/count_rewards * ( reward - rewards[reward_index]  )
-                count_rewards+=1
-            else:       #starting a new sequence of s steps
+            # update rewards
+            if count_rewards < np.floor(steps / 100.0):  # the same s steps
+                rewards[reward_index] += (
+                    1.0 / count_rewards * (reward - rewards[reward_index])
+                )
+                count_rewards += 1
+            else:  # starting a new sequence of s steps
                 reward_index += 1
                 count_rewards = 1
                 if reward_index < 100:
-                    rewards[reward_index] += 1.0/count_rewards * ( reward - rewards[reward_index]  )
+                    rewards[reward_index] += (
+                        1.0 / count_rewards * (reward - rewards[reward_index])
+                    )
 
-            if done == True:    #not game over
+            if done == True:  # not game over
                 # print("multiarmed state action: ", state_action_values)
                 observation = env.reset()
 
         env.close()
         return state_action_values, rewards
-
 
     def predict(self, env, state_action_values):
         """
@@ -144,9 +157,9 @@ class MultiArmedBandit:
             the number of steps taken within the episode.
         """
 
-        states = np.array([env.reset()])        #assume we're dealing with one state here
-        actions = np.array([ np.argmax(state_action_values[0]) ])
+        states = np.array([env.reset()])  # assume we're dealing with one state here
+        actions = np.array([np.argmax(state_action_values[0])])
 
         action = actions[0]
-        rewards = np.array([ env.step(action) ])
+        rewards = np.array([env.step(action)])
         return states, actions, rewards

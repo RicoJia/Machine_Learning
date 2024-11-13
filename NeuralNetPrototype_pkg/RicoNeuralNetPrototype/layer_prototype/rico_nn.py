@@ -1,10 +1,9 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
 import os
 import time
 
 import numpy as np
 import torch
-
 from RicoNeuralNetPrototype.layer_prototype.cnn import (
     SGD,
     Conv2d,
@@ -210,9 +209,8 @@ def test_rico_NN_on_validation_data(x_test, model, y_test):
     accuracy = correct / total
     print(f"accuracy: {accuracy}")
 
-def test_rico_NN(
-    x_train, y_train, x_test, y_test, model: RicoNNBase
-):
+
+def test_rico_NN(x_train, y_train, x_test, y_test, model: RicoNNBase):
     model.load_model()
     criterion = MSELoss()
     optimizer = SGD(layers=model.layers, criterion=criterion, lr=LR)

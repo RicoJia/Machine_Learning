@@ -1,18 +1,18 @@
-from src import KMeans, GMM
-import numpy as np
-from src import adjusted_mutual_info, generate_cluster_data
 import os
 import random
-from scipy.stats import multivariate_normal
 from itertools import permutations
 
-print('Starting example experiment')
+import numpy as np
+from scipy.stats import multivariate_normal
+from src import GMM, KMeans, adjusted_mutual_info, generate_cluster_data
+
+print("Starting example experiment")
 
 
 def _test_gmm_parameters(covariance_type):
     n_samples = [1000]
     n_centers = [2]
-    stds = [.1, .5]
+    stds = [0.1, 0.5]
     n_features = [2, 4]
 
     for n in n_samples:
@@ -20,18 +20,15 @@ def _test_gmm_parameters(covariance_type):
             for c in n_centers:
                 for s in stds:
                     features, targets = generate_cluster_data(
-                        n_samples=n,
-                        n_features=f,
-                        n_centers=c,
-                        cluster_stds=s
+                        n_samples=n, n_features=f, n_centers=c, cluster_stds=s
                     )
                     # make model and fit
                     model = GMM(c, covariance_type=covariance_type)
                     model.fit(features)
                     covariances = model.covariances
                     for cov in covariances:
-                        print ("mean cov: ", np.abs(np.sqrt(cov) - s).mean())
-                        if (np.abs(np.sqrt(cov) - s).mean() < 1e-1):
+                        print("mean cov: ", np.abs(np.sqrt(cov) - s).mean())
+                        if np.abs(np.sqrt(cov) - s).mean() < 1e-1:
                             return
                     #
                     #

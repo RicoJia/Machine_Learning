@@ -17,8 +17,7 @@ class MultiClassGradientDescent:
             regularization to perform. Must be non-negative.
     """
 
-    def __init__(self, loss, regularization=None,
-                 learning_rate=0.01, reg_param=0.05):
+    def __init__(self, loss, regularization=None, learning_rate=0.01, reg_param=0.05):
         self.loss = loss
         self.regularization = regularization
         self.learning_rate = learning_rate
@@ -58,7 +57,7 @@ class MultiClassGradientDescent:
         classes_num = self.classes.shape[0]
 
         for i_class in range(classes_num):
-            #relabel all targets, 1 for target that is the class, -1 for else
+            # relabel all targets, 1 for target that is the class, -1 for else
             targets_copy = np.copy(targets)
             for i_target in range(targets.shape[0]):
                 if targets_copy[i_target] != self.classes[i_class]:
@@ -67,11 +66,16 @@ class MultiClassGradientDescent:
                     targets_copy[i_target] = 1
 
             np.random.seed(0)
-            learner = GradientDescent(loss=self.loss, regularization=self.regularization,
-                              learning_rate=self.learning_rate, reg_param=self.reg_param)
-            learner.fit(features, targets_copy, batch_size=batch_size, max_iter=max_iter)
+            learner = GradientDescent(
+                loss=self.loss,
+                regularization=self.regularization,
+                learning_rate=self.learning_rate,
+                reg_param=self.reg_param,
+            )
+            learner.fit(
+                features, targets_copy, batch_size=batch_size, max_iter=max_iter
+            )
             self.model.append(learner)
-
 
     def predict(self, features):
         """
@@ -91,14 +95,16 @@ class MultiClassGradientDescent:
         """
         predictions = np.zeros(features.shape[0])
         for i_feature in range(features.shape[0]):
-            max_confidence_learner_list = [float('-inf'), float('-inf')]
+            max_confidence_learner_list = [float("-inf"), float("-inf")]
             for i_learner in range(len(self.model)):
                 learner = self.model[i_learner]
-                confidence = learner.confidence(features[i_feature, :].reshape(1, features.shape[1]) )[0]
+                confidence = learner.confidence(
+                    features[i_feature, :].reshape(1, features.shape[1])
+                )[0]
                 if confidence > max_confidence_learner_list[0]:
                     max_confidence_learner_list[0] = confidence
                     max_confidence_learner_list[1] = i_learner
 
-            predictions[i_feature] = self.classes[ max_confidence_learner_list[1] ]
+            predictions[i_feature] = self.classes[max_confidence_learner_list[1]]
 
         return predictions

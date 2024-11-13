@@ -8,6 +8,7 @@ from functools import cache, cached_property
 from typing import List, Tuple
 
 import albumentations as A
+
 # pytorch is a file but not a registered module, so it has to be imported separately
 import albumentations.pytorch as At
 import cv2
@@ -15,12 +16,12 @@ import numpy as np
 import requests
 import torch
 from PIL import Image
+from pycocotools.coco import COCO
 from torch.utils.data import Dataset, random_split
 from torchvision import datasets, transforms
 from torchvision.transforms import CenterCrop, v2
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
-from pycocotools.coco import COCO
 
 
 def replace_tensor_val(tensor, a, b):
@@ -329,6 +330,7 @@ class VOCSegmentationDataset(Dataset):
     def __len__(self):
         return len(self._dataset)
 
+
 class COCODataset:
     """
     coco/
@@ -339,13 +341,18 @@ class COCODataset:
         ├── instances_train2017.json
         └── instances_val2017.json
     """
-    def __init__(self, images_dir, annotation_json_path, manual_find_class_num=False) -> None:
+
+    def __init__(
+        self, images_dir, annotation_json_path, manual_find_class_num=False
+    ) -> None:
         self._images_dir = images_dir
         self._labels_dir = annotation_json_path
         self.coco = COCO(annotation_file=annotation_json_path)
         self.image_ids = list(self.coco.imgs.keys())
-    def __len__(self): 
+
+    def __len__(self):
         return len(self.image_ids)
+
     def __getitem__(self, idx):
         img_id = self.image_ids[idx]
         ann_ids = self.coco.getAnnIds(imgIds=img_id)
@@ -353,14 +360,14 @@ class COCODataset:
 
         # Load image
         img_info = self.coco.loadImgs(img_id)[0]
-        img_path = os.path.join(self._images_dir, img_info['file_name'])
+        img_path = os.path.join(self._images_dir, img_info["file_name"])
         image = Image.open(img_path).convert("RGB")
 
         # Initialize mask
-        mask = np.zeros((img_info['width'], img_info['height']), dtype=np.int64)
+        mask = np.zeros((img_info["width"], img_info["height"]), dtype=np.int64)
         # TODO
         # mask = Image.new('L', (img_info['width'], img_info['height']), 0)
-        
+
 
 ##################################################################
 ## Tool Functions

@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from RicoNeuralNetPrototype.models.torch_models import SimpleNN, predict
 from RicoNeuralNetPrototype.utils.debug_tools import FCN2DDebugger, FCNDebuggerConfig
 from RicoNeuralNetPrototype.utils.input_data import (

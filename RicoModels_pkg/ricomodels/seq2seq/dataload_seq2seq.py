@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 
-from __future__ import unicode_literals, print_function, division
-from io import open
-import unicodedata
-import re
-import random
+from __future__ import division, print_function, unicode_literals
 
-import torch
-import torch.nn as nn
-from torch import optim
-import torch.nn.functional as F
+import random
+import re
+import unicodedata
+from io import open
 
 import numpy as np
-from torch.utils.data import TensorDataset, DataLoader, RandomSampler
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch import optim
+from torch.utils.data import DataLoader, RandomSampler, TensorDataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -20,13 +20,14 @@ SOS_token = 0
 EOS_token = 1
 MAX_LENGTH = 30
 
+
 # Turn a Unicode string to plain ASCII, thanks to
 # https://stackoverflow.com/a/518232/2809427
 def unicodeToAscii(s):
-    return ''.join(
-        c for c in unicodedata.normalize('NFD', s)
-        if unicodedata.category(c) != 'Mn'
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
     )
+
 
 # Lowercase, trim, and remove non-letter characters
 def normalizeString(s):
@@ -36,17 +37,19 @@ def normalizeString(s):
     # return a string
     return s.strip()
 
+
 def readLangs(lang1, lang2, reverse=False):
     # use this to preprocess spa.txt
     # sed 's/CC-BY 2\.0.*//' spa.txt > spa-eng.txt
     print("Reading lines...")
 
     # Read the file and split into lines
-    lines = open('%s-%s.txt' % (lang1, lang2), encoding='utf-8').\
-        read().strip().split('\n')
+    lines = (
+        open("%s-%s.txt" % (lang1, lang2), encoding="utf-8").read().strip().split("\n")
+    )
 
     # Split every line into pairs and normalize
-    pairs = [[normalizeString(s) for s in l.split('\t') if s] for l in lines]
+    pairs = [[normalizeString(s) for s in l.split("\t") if s] for l in lines]
 
     # Reverse pairs, make Lang instances
     if reverse:
@@ -59,29 +62,38 @@ def readLangs(lang1, lang2, reverse=False):
 
     return input_lang, output_lang, pairs
 
+
 eng_prefixes = (
-    "i am ", "i m ",
-    "he is", "he s ",
-    "she is", "she s ",
-    "you are", "you re ",
-    "we are", "we re ",
-    "they are", "they re "
+    "i am ",
+    "i m ",
+    "he is",
+    "he s ",
+    "she is",
+    "she s ",
+    "you are",
+    "you re ",
+    "we are",
+    "we re ",
+    "they are",
+    "they re ",
 )
 
+
 def filterPair(p):
-    return len(p[0].split(' ')) < MAX_LENGTH and \
-        len(p[1].split(' ')) < MAX_LENGTH
-        # p[1].startswith(eng_prefixes)
+    return len(p[0].split(" ")) < MAX_LENGTH and len(p[1].split(" ")) < MAX_LENGTH
+    # p[1].startswith(eng_prefixes)
 
 
 def filterPairs(pairs):
     return [pair for pair in pairs if filterPair(pair)]
+
 
 class Lang:
     """
     Build a counter, and word <-> index lookups for every new word.
     This will help set up one-hot vectors
     """
+
     def __init__(self, name):
         self.name = name
         self.word2index = {}
@@ -90,7 +102,7 @@ class Lang:
         self.n_words = 2  # Count SOS and EOS
 
     def addSentence(self, sentence):
-        for word in sentence.split(' '):
+        for word in sentence.split(" "):
             self.addWord(word)
 
     def addWord(self, word):
@@ -101,6 +113,7 @@ class Lang:
             self.n_words += 1
         else:
             self.word2count[word] += 1
+
 
 def prepareData(lang1, lang2, reverse=False):
     input_lang, output_lang, pairs = readLangs(lang1, lang2, reverse)
@@ -116,21 +129,25 @@ def prepareData(lang1, lang2, reverse=False):
     print(output_lang.name, output_lang.n_words)
     return input_lang, output_lang, pairs
 
+
 def indexesFromSentence(lang, sentence):
-    return [lang.word2index[word] for word in sentence.split(' ')]
+    return [lang.word2index[word] for word in sentence.split(" ")]
+
 
 def tensorFromSentence(lang, sentence):
     indexes = indexesFromSentence(lang, sentence)
     indexes.append(EOS_token)
     return torch.tensor(indexes, dtype=torch.long, device=device).view(1, -1)
 
+
 def tensorsFromPair(pair):
     input_tensor = tensorFromSentence(input_lang, pair[0])
     target_tensor = tensorFromSentence(output_lang, pair[1])
     return (input_tensor, target_tensor)
 
+
 def get_dataloader(batch_size):
-    input_lang, output_lang, pairs = prepareData('spa', 'eng', True)
+    input_lang, output_lang, pairs = prepareData("spa", "eng", True)
 
     n = len(pairs)
     input_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
@@ -141,16 +158,20 @@ def get_dataloader(batch_size):
         tgt_ids = indexesFromSentence(output_lang, tgt)
         inp_ids.append(EOS_token)
         tgt_ids.append(EOS_token)
-        input_ids[idx, :len(inp_ids)] = inp_ids
-        target_ids[idx, :len(tgt_ids)] = tgt_ids
+        input_ids[idx, : len(inp_ids)] = inp_ids
+        target_ids[idx, : len(tgt_ids)] = tgt_ids
 
-    train_data = TensorDataset(torch.LongTensor(input_ids).to(device),
-                               torch.LongTensor(target_ids).to(device))
+    train_data = TensorDataset(
+        torch.LongTensor(input_ids).to(device), torch.LongTensor(target_ids).to(device)
+    )
 
     train_sampler = RandomSampler(train_data)
-    train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
+    train_dataloader = DataLoader(
+        train_data, sampler=train_sampler, batch_size=batch_size
+    )
     return input_lang, output_lang, train_dataloader, pairs
 
+
 if __name__ == "__main__":
-    input_lang, output_lang, pairs = prepareData('spa', 'eng',True)
+    input_lang, output_lang, pairs = prepareData("spa", "eng", True)
     print("input_lang, output_lang, pairs:", f"{input_lang, output_lang, pairs}")

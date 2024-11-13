@@ -11,6 +11,7 @@ import numpy as np
 # Demo Cost function visualization
 ########################################################
 
+
 def relu(z, derivative=False):
     if derivative:
         return np.where(z > 0, 1, 0)
@@ -29,6 +30,7 @@ def sigmoid(z, derivative=False):
         s = 1 / (1 + np.exp(-z))
         return s * (1 - s)
     return 1 / (1 + np.exp(-z))
+
 
 def plot_func(func):
     x = np.linspace(-5, 5, 100)

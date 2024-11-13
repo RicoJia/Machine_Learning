@@ -1,6 +1,7 @@
 import json
-import numpy as np
 import os
+
+import numpy as np
 
 
 def load_json_data(json_path):
@@ -15,7 +16,7 @@ def load_json_data(json_path):
         targets (np.ndarray): numpy array containing the y values in the range -1, 1.
     """
 
-    with open(json_path, 'rb') as f:
+    with open(json_path, "rb") as f:
         data = json.load(f)
     features = np.array(data[0]).astype(float)
     targets = 2 * (np.array(data[1]).astype(float) - 1) - 1
@@ -25,10 +26,10 @@ def load_json_data(json_path):
 
 if __name__ == "__main__":
     """
-    Running this from the command line in this directory will tell you the shapes of 
+    Running this from the command line in this directory will tell you the shapes of
     each dataset, and also visualize the datasets for you.
 
-        $ python load_json_data.py 
+        $ python load_json_data.py
         (110, 2) (110,) ../data/parallel_lines.json
         (127, 2) (127,) ../data/blobs.json
         (68, 2) (68,) ../data/crossing.json
@@ -40,13 +41,13 @@ if __name__ == "__main__":
     except:
         import matplotlib
 
-        matplotlib.use('Agg')
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
     data_files = [
-        os.path.join('..', 'data', x)
-        for x in os.listdir(os.path.join('..', 'data'))
-        if os.path.splitext(x)[1] == '.json'
+        os.path.join("..", "data", x)
+        for x in os.listdir(os.path.join("..", "data"))
+        if os.path.splitext(x)[1] == ".json"
     ]
 
     for data_file in data_files:
@@ -54,5 +55,5 @@ if __name__ == "__main__":
         plt.figure(figsize=(6, 4))
         plt.scatter(features[:, 0], features[:, 1], c=targets)
         plt.title(data_file)
-        plt.savefig(os.path.join('..', 'data', '{}.png'.format(data_file)))
+        plt.savefig(os.path.join("..", "data", "{}.png".format(data_file)))
         print(features.shape, targets.shape, data_file)

@@ -2,10 +2,11 @@
 # from  prior_probability import PriorProbability
 # from  metrics import precision_and_recall, confusion_matrix, f1_measure, accuracy
 # from  data import load_data, train_test_split
-from  .decision_tree import DecisionTree
-from  .prior_probability import PriorProbability
-from  .metrics import precision_and_recall, confusion_matrix, f1_measure, accuracy
-from  .data import load_data, train_test_split
+from .data import load_data, train_test_split
+from .decision_tree import DecisionTree
+from .metrics import accuracy, confusion_matrix, f1_measure, precision_and_recall
+from .prior_probability import PriorProbability
+
 
 def run(data_path, learner_type, fraction):
     """
@@ -46,18 +47,18 @@ def run(data_path, learner_type, fraction):
         f1_measure (np.float): F1 Measure on testing examples using learner
     """
 
-
     features, targets, attribute_names = load_data(data_path)
-    train_features, train_targets, test_features, test_targets = train_test_split(features,targets,fraction)
+    train_features, train_targets, test_features, test_targets = train_test_split(
+        features, targets, fraction
+    )
 
-
-    if learner_type == 'decision_tree':
+    if learner_type == "decision_tree":
 
         decision_tree = DecisionTree(attribute_names=attribute_names)
         decision_tree.tree = decision_tree.fit(train_features, train_targets)
-        #test
+        # test
         decision_tree.visualize()
-        predictions = (decision_tree.predict(test_features))
+        predictions = decision_tree.predict(test_features)
         confusion_mat = confusion_matrix(test_targets, predictions)
         precision, recall = precision_and_recall(test_targets, predictions)
         acc = accuracy(test_targets, predictions)
@@ -76,30 +77,29 @@ def run(data_path, learner_type, fraction):
     return confusion_mat, acc, precision, recall, f1
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     # data_path = "../data/majority-rule.csv"
     data_path = "../data/xor.csv"
     # data_path = "../data/candy-data.csv"
     # data_path = "../data/ivy-league.csv"
-    learner_type='decision_tree'        #TODO
+    learner_type = "decision_tree"  # TODO
     fraction = 0.8
     confusion_mat, acc, precision, recall, f1 = run(data_path, learner_type, fraction)
 
-    print (confusion_mat)
+    print(confusion_mat)
     print("----------decision tree results: ")
-    print ("precision: ", precision)
-    print ("recall: ", recall)
-    print ("accuracy: ", acc)
-    print ("f1_score: ", f1)
+    print("precision: ", precision)
+    print("recall: ", recall)
+    print("accuracy: ", acc)
+    print("f1_score: ", f1)
 
-    learner_type='prior probability'        #TODO
+    learner_type = "prior probability"  # TODO
     fraction = 1.0
     confusion_mat, acc, precision, recall, f1 = run(data_path, learner_type, fraction)
 
-
     print("----------prior probability results: ")
-    print (confusion_mat)
-    print ("precision: ", precision)
-    print ("recall: ", recall)
-    print ("accuracy: ", acc)
-    print ("f1_score: ", f1)
+    print(confusion_mat)
+    print("precision: ", precision)
+    print("recall: ", recall)
+    print("accuracy: ", acc)
+    print("f1_score: ", f1)

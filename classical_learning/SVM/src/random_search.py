@@ -1,4 +1,4 @@
-'''
+"""
 This class should implement Random Search Cross Validation which is a hyperparameter
 tuning approach. In fact, Random Search CV will simply run many different classifiers
 of the same type but with different hyperparameter settings.
@@ -11,7 +11,7 @@ might run the experiments with following parameter combinations: [0, 4], [0,5], 
 
 You need to use the parallelizer in the fit function of this class. The worker function
 itself should run 20 fold cross validation. That means that you are running 20 trials.
-'''
+"""
 
 import random
 from copy import deepcopy
@@ -23,7 +23,7 @@ from worker import run_experiment
 class RandomSearchCV:
 
     def __init__(self, estimator, param_distributions, n_iter=5):
-        '''
+        """
         This function should always get an estimator and a dictionary of parameters with possible
         values that the algorithm should use for hyperparameter tuning.
 
@@ -33,7 +33,7 @@ class RandomSearchCV:
             you can take a look at:
             https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.RandomizedSearchCV.html#sklearn.model_selection.RandomizedSearchCV
         :param n_iter: The number of random experiments the algorithm should run
-        '''
+        """
 
         # This variable should contain the final results after fitting your dataset
         self.cv_results = []
@@ -42,7 +42,7 @@ class RandomSearchCV:
         self.n_iter = n_iter
 
     def fit(self, inputs, targets):
-        '''
+        """
         This function should create n_iter random mutations of the parameter specification and
         run all the different experiments in parallel. Finally, the variable self.cv_results
         should contain the final results for the hyperparameter tuning.
@@ -71,12 +71,12 @@ class RandomSearchCV:
 
         :param inputs: The input features/data that you want to use for classification
         :param targets: The targets/classes for the given input data
-        '''
+        """
         ret_ls = []
         for i in range(self.n_iter):
             dic_row = {}
             for key, val in self.param_distributions.items():
-                index = int(len(val)*random.random())
+                index = int(len(val) * random.random())
                 dic_row[key] = val[index]
             ret_ls.append(dic_row)
 
@@ -85,15 +85,9 @@ class RandomSearchCV:
         for permutation in tuned_param_list:
             estimator = deepcopy(self.estimator)
             estimator.__init__(**permutation)
-            tuple = (estimator, permutation,inputs, targets)
+            tuple = (estimator, permutation, inputs, targets)
             total_param_list.append(tuple)
 
         par = Parallelizer(run_experiment)
         results = par.parallelize(total_param_list)
         self.cv_results = results
-
-
-
-
-
-

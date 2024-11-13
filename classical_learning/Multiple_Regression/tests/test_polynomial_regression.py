@@ -1,5 +1,6 @@
 import numpy as np
-from src import generate_regression_data, PolynomialRegression, mean_squared_error
+from src import PolynomialRegression, generate_regression_data, mean_squared_error
+
 
 def test_polynomial_regression():
     degrees = range(10)
@@ -12,5 +13,5 @@ def test_polynomial_regression():
             p.fit(x, y)
             y_hat = p.predict(x)
             mse = mean_squared_error(y, y_hat)
-            assert (mse < 1e-1)
+            assert mse < 1e-1
     return

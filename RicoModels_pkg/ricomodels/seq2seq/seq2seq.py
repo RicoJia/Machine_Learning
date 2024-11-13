@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-from torch import nn, cuda
-import torch
-from torch import optim
-import torch.nn.functional as F
-from dataload_seq2seq import SOS_token, EOS_token, get_dataloader, tensorFromSentence
-import time
 import math
+import time
 
 import matplotlib.pyplot as plt
-plt.switch_backend('agg')
-import matplotlib.ticker as ticker
-import numpy as np
+import torch
+import torch.nn.functional as F
+from dataload_seq2seq import EOS_token, SOS_token, get_dataloader, tensorFromSentence
+from torch import cuda, nn, optim
+
+plt.switch_backend("agg")
 import random
 
+import matplotlib.ticker as ticker
+import numpy as np
 from torch.utils.data import DataLoader  # Ensure DataLoader is imported if used
 
 MAX_LENGTH = 30
@@ -22,6 +22,7 @@ EPOCHS = 20
 #######################################################
 # Helper Functions
 #######################################################
+
 
 def to_device(data, device):
     """
@@ -43,6 +44,7 @@ def to_device(data, device):
     else:
         return data
 
+
 def showPlot(points):
     plt.figure()
     fig, ax = plt.subplots()
@@ -51,21 +53,25 @@ def showPlot(points):
     plt.plot(points)
     # plt.show()
 
+
 def asMinutes(s):
     m = math.floor(s / 60)
     s -= m * 60
-    return '%dm %ds' % (m, s)
+    return "%dm %ds" % (m, s)
+
 
 def timeSince(since, percent):
     now = time.time()
     s = now - since
     es = s / (percent)
     rs = es - s
-    return '%s (- %s)' % (asMinutes(s), asMinutes(rs))
+    return "%s (- %s)" % (asMinutes(s), asMinutes(rs))
+
 
 #######################################################
 # Model Definitions
 #######################################################
+
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, embed_dim, num_layers=1):
@@ -77,10 +83,11 @@ class Encoder(nn.Module):
 
     def forward(self, input_batch):
         embedded = self.dropout(self.embedding(input_batch))
-        #TODO Remember to remove
-        print(f'input batch, embedded: {input_batch.shape, embedded.shape}')
+        # TODO Remember to remove
+        print(f"input batch, embedded: {input_batch.shape, embedded.shape}")
         outputs, hidden = self.gru(embedded)
         return outputs, hidden
+
 
 class Decoder(nn.Module):
     def __init__(self, hidden_size, output_size, device):
@@ -93,11 +100,15 @@ class Decoder(nn.Module):
 
     def forward(self, encoder_outputs, encoder_hidden, target_tensor=None):
         batch_size = encoder_outputs.shape[0]
-        decoder_input = torch.full((batch_size, 1), SOS_token, dtype=torch.long, device=self.device)
+        decoder_input = torch.full(
+            (batch_size, 1), SOS_token, dtype=torch.long, device=self.device
+        )
         decoder_hidden = encoder_hidden
         decoder_outputs = []
         for i in range(MAX_LENGTH):
-            decoder_output, decoder_hidden = self.get_word_embedding(decoder_input, decoder_hidden)
+            decoder_output, decoder_hidden = self.get_word_embedding(
+                decoder_input, decoder_hidden
+            )
             decoder_outputs.append(decoder_output)
 
             if target_tensor is not None:
@@ -118,18 +129,29 @@ class Decoder(nn.Module):
         out = self.out(out)
         return out, hidden
 
+
 #######################################################
 # Training Infrastructure
 #######################################################
 
-def train_epoch(dataloader, encoder, decoder, encoder_optimizer,
-               decoder_optimizer, criterion, device):
+
+def train_epoch(
+    dataloader,
+    encoder,
+    decoder,
+    encoder_optimizer,
+    decoder_optimizer,
+    criterion,
+    device,
+):
     total_loss = 0
     for data in dataloader:
         input_tensor, target_tensor = data
 
         # Move tensors to the specified device
-        input_tensor, target_tensor = to_device(input_tensor, device), to_device(target_tensor, device)
+        input_tensor, target_tensor = to_device(input_tensor, device), to_device(
+            target_tensor, device
+        )
 
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
@@ -138,8 +160,7 @@ def train_epoch(dataloader, encoder, decoder, encoder_optimizer,
         decoder_outputs, _, _ = decoder(encoder_outputs, encoder_hidden, target_tensor)
 
         loss = criterion(
-            decoder_outputs.view(-1, decoder_outputs.size(-1)),
-            target_tensor.view(-1)
+            decoder_outputs.view(-1, decoder_outputs.size(-1)), target_tensor.view(-1)
         )
         loss.backward()
 
@@ -150,8 +171,17 @@ def train_epoch(dataloader, encoder, decoder, encoder_optimizer,
 
     return total_loss / len(dataloader)
 
-def train(train_dataloader, encoder, decoder, n_epochs, device, learning_rate=0.001,
-          print_every=100, plot_every=100):
+
+def train(
+    train_dataloader,
+    encoder,
+    decoder,
+    n_epochs,
+    device,
+    learning_rate=0.001,
+    print_every=100,
+    plot_every=100,
+):
     start = time.time()
     plot_losses = []
     print_loss_total = 0  # Reset every print_every
@@ -162,16 +192,30 @@ def train(train_dataloader, encoder, decoder, n_epochs, device, learning_rate=0.
     criterion = nn.NLLLoss()
 
     for epoch in range(1, n_epochs + 1):
-        loss = train_epoch(train_dataloader, encoder, decoder, encoder_optimizer,
-                          decoder_optimizer, criterion, device)
+        loss = train_epoch(
+            train_dataloader,
+            encoder,
+            decoder,
+            encoder_optimizer,
+            decoder_optimizer,
+            criterion,
+            device,
+        )
         print_loss_total += loss
         plot_loss_total += loss
 
         if epoch % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
-            print('%s (%d %d%%) %.4f' % (timeSince(start, epoch / n_epochs),
-                                         epoch, epoch / n_epochs * 100, print_loss_avg))
+            print(
+                "%s (%d %d%%) %.4f"
+                % (
+                    timeSince(start, epoch / n_epochs),
+                    epoch,
+                    epoch / n_epochs * 100,
+                    print_loss_avg,
+                )
+            )
 
         if epoch % plot_every == 0:
             plot_loss_avg = plot_loss_total / plot_every
@@ -180,10 +224,13 @@ def train(train_dataloader, encoder, decoder, n_epochs, device, learning_rate=0.
 
     showPlot(plot_losses)
 
+
 def evaluate(encoder, decoder, sentence, input_lang, output_lang, device):
     with torch.no_grad():
         input_tensor = tensorFromSentence(input_lang, sentence)
-        input_tensor = to_device(input_tensor, device).unsqueeze(0)  # Add batch dimension
+        input_tensor = to_device(input_tensor, device).unsqueeze(
+            0
+        )  # Add batch dimension
 
         encoder_outputs, encoder_hidden = encoder(input_tensor)
         decoder_outputs, decoder_hidden, _ = decoder(encoder_outputs, encoder_hidden)
@@ -194,20 +241,26 @@ def evaluate(encoder, decoder, sentence, input_lang, output_lang, device):
         decoded_words = []
         for idx in decoded_ids:
             if idx.item() == EOS_token:
-                decoded_words.append('<EOS>')
+                decoded_words.append("<EOS>")
                 break
-            decoded_words.append(output_lang.index2word.get(idx.item(), '<UNK>'))  # Handle unknown indices
+            decoded_words.append(
+                output_lang.index2word.get(idx.item(), "<UNK>")
+            )  # Handle unknown indices
     return decoded_words
+
 
 def evaluateRandomly(encoder, decoder, pairs, input_lang, output_lang, device, n=100):
     for i in range(n):
         pair = random.choice(pairs)
-        print('>', pair[0])
-        print('=', pair[1])
-        output_words = evaluate(encoder, decoder, pair[0], input_lang, output_lang, device)
-        output_sentence = ' '.join(output_words)
-        print('<', output_sentence)
-        print('')
+        print(">", pair[0])
+        print("=", pair[1])
+        output_words = evaluate(
+            encoder, decoder, pair[0], input_lang, output_lang, device
+        )
+        output_sentence = " ".join(output_words)
+        print("<", output_sentence)
+        print("")
+
 
 def save_model(encoder, decoder, input_lang, output_lang, filepath):
     """
@@ -220,13 +273,17 @@ def save_model(encoder, decoder, input_lang, output_lang, filepath):
         output_lang (Lang): Language object for output language.
         filepath (str): Path to save the model.
     """
-    torch.save({
-        'encoder_state_dict': encoder.state_dict(),
-        'decoder_state_dict': decoder.state_dict(),
-        'input_lang': input_lang,
-        'output_lang': output_lang
-    }, filepath)
+    torch.save(
+        {
+            "encoder_state_dict": encoder.state_dict(),
+            "decoder_state_dict": decoder.state_dict(),
+            "input_lang": input_lang,
+            "output_lang": output_lang,
+        },
+        filepath,
+    )
     print(f"Model saved to {filepath}")
+
 
 def load_model(filepath, encoder, decoder, device):
     """
@@ -241,17 +298,18 @@ def load_model(filepath, encoder, decoder, device):
     """
     checkpoint = torch.load(filepath, map_location=device)
 
-    input_lang = checkpoint['input_lang']
-    output_lang = checkpoint['output_lang']
+    input_lang = checkpoint["input_lang"]
+    output_lang = checkpoint["output_lang"]
 
-    encoder.load_state_dict(checkpoint['encoder_state_dict'])
-    decoder.load_state_dict(checkpoint['decoder_state_dict'])
+    encoder.load_state_dict(checkpoint["encoder_state_dict"])
+    decoder.load_state_dict(checkpoint["decoder_state_dict"])
 
     encoder.to(device)
     decoder.to(device)
 
     print(f"Model loaded from {filepath}")
     return encoder, decoder, input_lang, output_lang
+
 
 #######################################################
 # Main Execution
@@ -262,7 +320,7 @@ if __name__ == "__main__":
     batch_size = 32
 
     # Define device
-    device = torch.device('cuda' if cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if cuda.is_available() else "cpu")
     print("Using device:", device)
 
     # Load data
@@ -275,10 +333,7 @@ if __name__ == "__main__":
     # Optionally load a pre-trained model
     try:
         encoder, decoder, input_lang_loaded, output_lang_loaded = load_model(
-            MODEL_SAVE_PATH,
-            encoder,
-            decoder,
-            device
+            MODEL_SAVE_PATH, encoder, decoder, device
         )
     except FileNotFoundError:
         print("No pre-trained model found. Starting training from scratch.")

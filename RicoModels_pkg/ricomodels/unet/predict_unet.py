@@ -4,9 +4,12 @@ import logging
 import torch
 from ricomodels.unet.train_unet import INTERMEDIATE_BEFORE_MAX_POOL, MODEL_PATH
 from ricomodels.unet.unet import UNet
-from ricomodels.utils.data_loading import (get_carvana_datasets,
-                                           get_data_loader, get_gta5_datasets,
-                                           get_VOC_segmentation_datasets)
+from ricomodels.utils.data_loading import (
+    get_carvana_datasets,
+    get_data_loader,
+    get_gta5_datasets,
+    get_VOC_segmentation_datasets,
+)
 from ricomodels.utils.training_tools import eval_model
 
 BATCH_SIZE = 16

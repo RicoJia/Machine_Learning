@@ -1,9 +1,11 @@
-'''
+"""
 This experiment should walk you through a hyperparameter tuning setup.
 Althoug you are going to implement your own hyperpramater tuning algorithms
 the signature of the functions and composition of classes is pretty similar
 to sklearn's way of tuning hyperparameters.
-'''
+"""
+
+from circle import load_circle
 
 # from .grid_search import GridSearchCV
 # from .mnist import load_mnist
@@ -11,11 +13,11 @@ to sklearn's way of tuning hyperparameters.
 # from .random_search import RandomSearchCV
 from grid_search import GridSearchCV
 from mnist import load_mnist
-from circle import load_circle
 from random_search import RandomSearchCV
 
+
 def run(estimator, search_type, tuned_parameters, inputs, targets, n_iter=5):
-    '''
+    """
     This function walks you through an hyperparameter tuning example. You can find
     example calls in test_experiment.py in the tests folder.
 
@@ -38,10 +40,10 @@ def run(estimator, search_type, tuned_parameters, inputs, targets, n_iter=5):
     :return: A list of all the configurations your tuner created with the resulting accuracy.
         This list should be sorted by accuracy. The best configuration should be the first
         element of the list.
-    '''
+    """
 
     # Initialize the correct hyperparameter tuner depending on search_type
-    if search_type == 'grid_search':
+    if search_type == "grid_search":
         tuner = GridSearchCV(estimator, tuned_parameters)
     else:
         tuner = RandomSearchCV(estimator, tuned_parameters, n_iter=n_iter)

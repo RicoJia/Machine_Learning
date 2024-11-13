@@ -1,6 +1,8 @@
-import numpy as np 
-import os
 import csv
+import os
+
+import numpy as np
+
 
 def str_2_float(str):
     try:
@@ -8,6 +10,7 @@ def str_2_float(str):
         return s
     except ValueError:
         pass
+
 
 def load_data(data_path):
     """
@@ -59,15 +62,15 @@ def load_data(data_path):
     targets = []
     line_index = 0
     with open(data_path) as data_file:
-        reader = csv.reader(data_file, delimiter=',')
+        reader = csv.reader(data_file, delimiter=",")
         for line in reader:
-            if len(attribute_names)==0:
+            if len(attribute_names) == 0:
                 attribute_names = line
-                attribute_names.pop()   #pop the last element which is 'class'
+                attribute_names.pop()  # pop the last element which is 'class'
             else:
                 line = [str_2_float(i) for i in line if str_2_float(i) is not None]
                 targets.append(line[-1])
-                line.pop()      #pop the last element of line
+                line.pop()  # pop the last element of line
                 features.append(line)
     # return np.array(features), np.array(targets).reshape(len(targets),1), attribute_names
     return np.array(features), np.array(targets), attribute_names
@@ -94,31 +97,34 @@ def train_test_split(features, targets, fraction):
         test_features: subset of features containing N examples to be used for testing.
         test_targets: subset of targets corresponding to test_features containing targets.
     """
-    train_features = np.empty((0,features.shape[1]),float)
+    train_features = np.empty((0, features.shape[1]), float)
     train_targets = np.array([])
-    test_features = np.empty((0,features.shape[1]),float)
+    test_features = np.empty((0, features.shape[1]), float)
     test_targets = np.array([])
 
-    if (fraction > 1.0):
-        raise ValueError('N cannot be bigger than number of examples!')
-    if (fraction == 1.0):
-        #when fraction = 1, returns the features and targets themselves
+    if fraction > 1.0:
+        raise ValueError("N cannot be bigger than number of examples!")
+    if fraction == 1.0:
+        # when fraction = 1, returns the features and targets themselves
         return features, targets, features, targets
 
     N = int(features.shape[0] * fraction)
 
-    train_row_number_set = set(np.random.choice(range(features.shape[0]), N, replace=False))
+    train_row_number_set = set(
+        np.random.choice(range(features.shape[0]), N, replace=False)
+    )
     test_row_number_set = set(range(features.shape[0])) - train_row_number_set
 
     for train_index in train_row_number_set:
-        train_features = np.vstack((train_features, features[train_index,:]))
+        train_features = np.vstack((train_features, features[train_index, :]))
         train_targets = np.append(train_targets, targets[train_index])
 
     for test_index in test_row_number_set:
-        test_features = np.vstack((test_features, features[test_index,:]))
+        test_features = np.vstack((test_features, features[test_index, :]))
         test_targets = np.append(test_targets, targets[test_index])
 
     return train_features, train_targets, test_features, test_targets
+
 
 # if __name__=='__main__':
 #     # data_path = "../data/candy-data.csv"

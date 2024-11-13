@@ -1,10 +1,12 @@
 import json
-import numpy as np
 import os
+
+import numpy as np
+
 
 def load_json_data(json_path):
     """
-    Loads data from JSON files kept in data/. Implemented this for you, you are 
+    Loads data from JSON files kept in data/. Implemented this for you, you are
     welcome.
 
     Args:
@@ -14,51 +16,51 @@ def load_json_data(json_path):
         targets (np.ndarray): numpy array containing the y values in the range -1, 1.
     """
 
-    with open(json_path, 'rb') as f:
+    with open(json_path, "rb") as f:
         data = json.load(f)
     features = np.array(data[0]).astype(float)
     targets = 2 * (np.array(data[1]).astype(float) - 1) - 1
 
     return features, targets
 
+
 if __name__ == "__main__":
     """
-    Running this from the command line in this directory will tell you the shapes of 
+    Running this from the command line in this directory will tell you the shapes of
     each dataset, and also visualize the datasets for you.
 
-        $ python load_json_data.py 
+        $ python load_json_data.py
         (110, 2) (110,) ../data/parallel_lines.json
         (127, 2) (127,) ../data/blobs.json
         (68, 2) (68,) ../data/crossing.json
         (131, 2) (131,) ../data/circles.json
-    
+
     """
     try:
         import matplotlib.pyplot as plt
     except:
         import matplotlib
-        matplotlib.use('Agg')
+
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
     data_files = [
-        os.path.join('../data', x)
-        for x in os.listdir('../data/')
-        if x[-4:] == 'json']
+        os.path.join("../data", x) for x in os.listdir("../data/") if x[-4:] == "json"
+    ]
 
     for data_file in data_files:
         features, targets = load_json_data(data_file)
-        plt.figure(figsize=(6,4))
+        plt.figure(figsize=(6, 4))
         plt.scatter(features[:, 0], features[:, 1], c=targets)
         plt.title(data_file)
-        plt.savefig(f'../data/{data_file}.png')
+        plt.savefig(f"../data/{data_file}.png")
         plt.show()
         print(features.shape, targets.shape, data_file)
 
-
     features, targets = load_json_data(data_file)
-    plt.figure(figsize=(6,4))
+    plt.figure(figsize=(6, 4))
     plt.scatter(features[:, 0], features[:, 1], c=targets)
     plt.title(data_file)
-    plt.savefig(f'../data/{data_file}.png')
+    plt.savefig(f"../data/{data_file}.png")
     plt.show()
     print(features.shape, targets.shape, data_file)

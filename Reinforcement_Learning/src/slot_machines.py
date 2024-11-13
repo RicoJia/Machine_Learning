@@ -1,5 +1,5 @@
-import numpy as np
 import gym
+import numpy as np
 from gym import spaces
 from gym.utils import seeding
 
@@ -68,7 +68,7 @@ class SlotMachines(gym.Env):
         """
         return 0
 
-    def render(self, mode='human', close=False):
+    def render(self, mode="human", close=False):
         """
         Render the environment display. For SlotMachines, this is a no-op.
         """

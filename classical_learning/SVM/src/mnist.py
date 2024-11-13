@@ -1,8 +1,19 @@
-import os, struct
-from array import array as pyarray 
+import os
+import struct
+from array import array as pyarray
+
 from numpy import append, array, int8, uint8, zeros
 
-def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, selection=None, return_labels=True, return_indices=False):
+
+def load_mnist(
+    dataset="training",
+    digits=None,
+    path="../data/",
+    asbytes=False,
+    selection=None,
+    return_labels=True,
+    return_indices=False,
+):
     """
     Loads MNIST files into a 3D numpy array.
 
@@ -11,13 +22,13 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
 
     Parameters
     ----------
-    dataset : str 
+    dataset : str
         Either "training" or "testing", depending on which dataset you want to
-        load. 
-    digits : list 
+        load.
+    digits : list
         Integer list of digits to load. The entire database is loaded if set to
         ``None``. Default is ``None``.
-    path : str 
+    path : str
         Path to your MNIST datafiles. The default is "../data/". The data can
         be downloaded from http://yann.lecun.com/exdb/mnist/.
     asbytes : bool
@@ -54,7 +65,7 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
 
     >>> images, labels = ag.io.load_mnist('training') # doctest: +SKIP
 
-    Load 100 sevens from the testing set:    
+    Load 100 sevens from the testing set:
 
     >>> sevens = ag.io.load_mnist('testing', digits=[7], selection=slice(0, 100), return_labels=False) # doctest: +SKIP
 
@@ -62,15 +73,17 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
 
     # The files are assumed to have these names and should be found in 'path'
     files = {
-        'training': ('train-images-idx3-ubyte', 'train-labels-idx1-ubyte'),
-        'testing': ('t10k-images-idx3-ubyte', 't10k-labels-idx1-ubyte'),
+        "training": ("train-images-idx3-ubyte", "train-labels-idx1-ubyte"),
+        "testing": ("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"),
     }
 
     if path is None:
         try:
-            path = os.environ['MNIST']
+            path = os.environ["MNIST"]
         except KeyError:
-            raise ValueError("Unspecified path requires environment variable $MNIST to be set")
+            raise ValueError(
+                "Unspecified path requires environment variable $MNIST to be set"
+            )
 
     try:
         images_fname = os.path.join(path, files[dataset][0])
@@ -80,12 +93,12 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
 
     # We can skip the labels file only if digits aren't specified and labels aren't asked for
     if return_labels or digits is not None:
-        flbl = open(labels_fname, 'rb')
+        flbl = open(labels_fname, "rb")
         magic_nr, size = struct.unpack(">II", flbl.read(8))
         labels_raw = pyarray("b", flbl.read())
         flbl.close()
 
-    fimg = open(images_fname, 'rb')
+    fimg = open(images_fname, "rb")
     magic_nr, size, rows, cols = struct.unpack(">IIII", fimg.read(16))
     images_raw = pyarray("B", fimg.read())
     fimg.close()
@@ -96,7 +109,7 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
         indices = range(size)
 
     if selection:
-        indices = indices[selection] 
+        indices = indices[selection]
     N = len(indices)
 
     images = zeros((N, rows, cols), dtype=uint8)
@@ -104,14 +117,16 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
     if return_labels:
         labels = zeros((N), dtype=int8)
     for i, index in enumerate(indices):
-        images[i] = array(images_raw[ indices[i]*rows*cols : (indices[i]+1)*rows*cols ]).reshape((rows, cols))
+        images[i] = array(
+            images_raw[indices[i] * rows * cols : (indices[i] + 1) * rows * cols]
+        ).reshape((rows, cols))
         if return_labels:
             labels[i] = labels_raw[indices[i]]
 
     if not asbytes:
-        images = images.astype(float)/255.0
+        images = images.astype(float) / 255.0
 
-    images = images.reshape((-1,784))
+    images = images.reshape((-1, 784))
 
     ret = (images,)
     if return_labels:
@@ -119,8 +134,6 @@ def load_mnist(dataset="training", digits=None, path='../data/', asbytes=False, 
     if return_indices:
         ret += (indices,)
     if len(ret) == 1:
-        return ret[0] # Don't return a tuple of one
+        return ret[0]  # Don't return a tuple of one
     else:
         return ret
-
-

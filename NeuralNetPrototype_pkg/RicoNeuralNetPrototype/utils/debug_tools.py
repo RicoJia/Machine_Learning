@@ -144,7 +144,7 @@ class FCNDebugger:
 
     def _plot_accuracy(self):
         # Runs validation set in the model, then calculate accuracy
-        # TODO: COULD BE A BUG HERE 
+        # TODO: COULD BE A BUG HERE
         y_test_labels = np.argmax(self._y_test, axis=-1)
         y_hat = (
             self._predict_func(X=torch.from_numpy(self._X_test), use_argmax=True)

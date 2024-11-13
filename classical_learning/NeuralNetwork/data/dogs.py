@@ -1,7 +1,8 @@
+import os
+
 import numpy as np
 import pandas as pd
 from matplotlib.pyplot import imread
-import os
 
 
 class DogsDataset:
@@ -30,20 +31,19 @@ class DogsDataset:
             `[num_examples]`
 
         """
-        self.path_to_dogs_csv = os.path.join(path_to_dogsset, 'dogs.csv')
-        self.images_dir = os.path.join(path_to_dogsset, 'images')
+        self.path_to_dogs_csv = os.path.join(path_to_dogsset, "dogs.csv")
+        self.images_dir = os.path.join(path_to_dogsset, "images")
         np.random.seed(0)
         self.num_classes = num_classes
         # Load in all the data we need from disk
         self.metadata = pd.read_csv(self.path_to_dogs_csv)
-        self.semantic_labels = dict(zip(
-            self.metadata['numeric_label'],
-            self.metadata['semantic_label']
-        ))
+        self.semantic_labels = dict(
+            zip(self.metadata["numeric_label"], self.metadata["semantic_label"])
+        )
 
-        self.trainX, self.trainY = self._load_data('train')
-        self.validX, self.validY = self._load_data('valid')
-        self.testX, self.testY = self._load_data('test')
+        self.trainX, self.trainY = self._load_data("train")
+        self.validX, self.validY = self._load_data("valid")
+        self.testX, self.testY = self._load_data("test")
         self.all_index = np.arange(len(self.trainX) + len(self.testX))
         self.all_count = 0
         self.valid_count = 0
@@ -78,14 +78,14 @@ class DogsDataset:
         specified by label. If num_examples is None, returns all relevant
         examples.
         """
-        if partition == 'train':
+        if partition == "train":
             X = self.trainX[self.trainY == label]
-        elif partition == 'valid':
+        elif partition == "valid":
             X = self.validX[self.validY == label]
-        elif partition == 'test':
+        elif partition == "test":
             X = self.testX[self.testY == label]
         else:
-            raise ValueError('Partition {} does not exist'.format(partition))
+            raise ValueError("Partition {} does not exist".format(partition))
         return X if num_examples == None else X[:num_examples]
 
     def get_semantic_label(self, numeric_label):
@@ -95,20 +95,22 @@ class DogsDataset:
         """
         return self.semantic_labels[numeric_label]
 
-    def _load_data(self, partition='train'):
+    def _load_data(self, partition="train"):
         """
         Loads a single data partition from file.
         """
         print("loading %s..." % partition)
         Y = None
-        if partition == 'all':
+        if partition == "all":
             X = self._get_images(
-                self.metadata[~self.metadata.partition.isin(['train', 'valid', 'test'])])
+                self.metadata[~self.metadata.partition.isin(["train", "valid", "test"])]
+            )
             X = self._preprocess(X, False)
             return X
         else:
             X, Y = self._get_images_and_labels(
-                self.metadata[self.metadata.partition == partition])
+                self.metadata[self.metadata.partition == partition]
+            )
             X = self._preprocess(X, True)
             return X, Y
 
@@ -119,17 +121,18 @@ class DogsDataset:
         """
         X, y = [], []
         for i, row in df.iterrows():
-            label = row['numeric_label']
-            if label >= self.num_classes: continue
-            image = imread(os.path.join(self.images_dir, row['filename']))
+            label = row["numeric_label"]
+            if label >= self.num_classes:
+                continue
+            image = imread(os.path.join(self.images_dir, row["filename"]))
             X.append(image)
-            y.append(row['numeric_label'])
+            y.append(row["numeric_label"])
         return np.array(X), np.array(y).astype(int)
 
     def _get_images(self, df):
         X = []
         for i, row in df.iterrows():
-            image = imread(os.path.join(self.images_dir, row['filename']))
+            image = imread(os.path.join(self.images_dir, row["filename"]))
             X.append(image)
         return np.array(X)
 
@@ -150,7 +153,6 @@ class DogsDataset:
             the normalized data as a numpy array.
         """
         if is_train:
-            self.image_mean = np.mean(X, axis=(0,1,2))
-            self.image_std = np.std(X, axis=(0,1,2))
+            self.image_mean = np.mean(X, axis=(0, 1, 2))
+            self.image_std = np.std(X, axis=(0, 1, 2))
         return (X - self.image_mean) / self.image_std
-

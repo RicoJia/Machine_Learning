@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import torch
 import pkg_resources
+import torch
+
 
 def mnist_preprocess(x, y):
     from keras.utils import to_categorical
@@ -16,12 +17,20 @@ def mnist_preprocess(x, y):
 
 
 def load_mnist():
-    package_name = 'RicoNeuralNetPrototype'
+    package_name = "RicoNeuralNetPrototype"
     X_TRAIN_FILE, X_TEST_FILE, Y_TRAIN_FILE, Y_TEST_FILE = (
-        pkg_resources.resource_filename(package_name,"layer_prototype/data/x_train.npy"),
-        pkg_resources.resource_filename(package_name,"layer_prototype/data/x_test.npy"),
-        pkg_resources.resource_filename(package_name,"layer_prototype/data/y_train.npy"),
-        pkg_resources.resource_filename(package_name,"layer_prototype/data/y_test.npy"),
+        pkg_resources.resource_filename(
+            package_name, "layer_prototype/data/x_train.npy"
+        ),
+        pkg_resources.resource_filename(
+            package_name, "layer_prototype/data/x_test.npy"
+        ),
+        pkg_resources.resource_filename(
+            package_name, "layer_prototype/data/y_train.npy"
+        ),
+        pkg_resources.resource_filename(
+            package_name, "layer_prototype/data/y_test.npy"
+        ),
     )
     try:
         x_train = np.load(X_TRAIN_FILE)
@@ -40,13 +49,9 @@ def load_mnist():
         np.save("data/y_train.npy", y_train)
         np.save("data/x_test.npy", x_test)
         np.save("data/y_test.npy", y_test)
-        print(
-            f"Saved mnist data to /data"
-        )
+        print(f"Saved mnist data to /data")
     else:
-        print(
-            f"Loaded mnist data from RicoNeuralNetPrototype/layer_prototype/data"
-        )
+        print(f"Loaded mnist data from RicoNeuralNetPrototype/layer_prototype/data")
     # training set: (60000, 28, 28), (60000, )
     # test set: (10000, 28, 28), (10000, )
 

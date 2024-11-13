@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
 import torch
-
 from RicoNeuralNetPrototype.layer_prototype.cnn import Linear, MSELoss
 
 

@@ -2,6 +2,7 @@
 
 from ricomodels.utils.visualization import *
 
+
 def test_training_timer():
     t = TrainingTimer()
     time.sleep(1)

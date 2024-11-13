@@ -11,7 +11,9 @@ def test_bandit_slots():
 
     np.random.seed(0)
 
-    env = gym.make('SlotMachines-v0', n_machines=10, mean_range=(-10, 10), std_range=(5, 10))
+    env = gym.make(
+        "SlotMachines-v0", n_machines=10, mean_range=(-10, 10), std_range=(5, 10)
+    )
     means = np.array([m.mean for m in env.machines])
 
     agent = MultiArmedBandit(epsilon=0.2)
@@ -35,7 +37,7 @@ def test_bandit_frozen_lake():
 
     np.random.seed(0)
 
-    env = gym.make('FrozenLake-v0')
+    env = gym.make("FrozenLake-v0")
     env.seed(0)
 
     agent = MultiArmedBandit(epsilon=0.2)

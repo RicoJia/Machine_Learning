@@ -1,4 +1,4 @@
-'''
+"""
 This class should implement Grid Search Cross Validation which is a hyperparameter
 tuning approach. In fact, Grid Search CV will simply run many different classifiers
 of the same type but with different hyperparameter settings.
@@ -9,19 +9,22 @@ combinations of parameters to run different models.
 
 You need to use the parallelizer in the fit function of this class. The worker function
 itself should run 20 fold cross validation. That means that you are running 20 trials.
-'''
+"""
+
 import itertools
 from copy import deepcopy
 
 from parallelizer import Parallelizer
 from worker import run_experiment
+
 # from parallelizer import Parallelizer
 # from worker import run_experiment
+
 
 class GridSearchCV:
 
     def __init__(self, estimator, tuned_parameters):
-        '''
+        """
         This function should always get an estimator and a dictionary of parameters with possible
         values that the algorithm should use for hyperparameter tuning.
 
@@ -29,7 +32,7 @@ class GridSearchCV:
         :param tuned_parameters: A dictionary that contains the parameter type as a key and a list
             of parameter values as value. To find an example of an example call you can take a look at
             https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html
-        '''
+        """
 
         # This variable should contain the final results after fitting your dataset in an order manner
         self.cv_results = []
@@ -37,7 +40,7 @@ class GridSearchCV:
         self.tuned_parameters = tuned_parameters
 
     def fit(self, inputs, targets):
-        '''
+        """
         This function should create all possible mutations of the parameter specification and
         run all the different experiments in parallel. Finally, the variable self.cv_results
         should contain the final results for the hyperparameter tuning.
@@ -63,13 +66,13 @@ class GridSearchCV:
 
         :param inputs: The input features/data that you want to use for classification
         :param targets: The targets/classes for the given input data
-        '''
+        """
         tuned_param_list = self.generate_all_permutations(self.tuned_parameters)
         total_param_list = []
         for permutation in tuned_param_list:
             estimator = deepcopy(self.estimator)
             estimator.__init__(**permutation)
-            tuple = (estimator, permutation,inputs, targets)
+            tuple = (estimator, permutation, inputs, targets)
             total_param_list.append(tuple)
 
         par = Parallelizer(run_experiment)
@@ -77,7 +80,7 @@ class GridSearchCV:
         self.cv_results = results
 
     def generate_all_permutations(self, tuned_parameters):
-        '''
+        """
         This function will return all possible permutations for a given dictionary of
         parameter_type (keys) and parameter_values (values). The list should finally look
         like this:
@@ -91,14 +94,13 @@ class GridSearchCV:
 
         :return: Returns all possible mutations as a list of dictionaries. Each dictionary should
             contain parameter_type and parameter_value pairs.
-        '''
+        """
         # ret_list = []
         # for k in tuned_parameters["kernel"]:
         #     for c in tuned_parameters["C"]:
         #         for g in tuned_parameters["gamma"]:
         #             ret = {"kernel": k, "C": c, "gamma":g}
         #             ret_list.append(ret)
-
 
         total_list = list(itertools.product(*tuned_parameters.values()))
         dic_keys_ls = list(tuned_parameters.keys())
@@ -110,7 +112,6 @@ class GridSearchCV:
             ret_ls.append(dic_row)
 
         return ret_ls
-
 
 
 #

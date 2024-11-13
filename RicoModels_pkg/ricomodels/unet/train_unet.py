@@ -6,17 +6,24 @@ import os
 import torch
 import wandb
 from ricomodels.unet.unet import UNet
-from ricomodels.utils.data_loading import (get_carvana_datasets,
-                                           get_data_loader, get_gta5_datasets,
-                                           get_package_dir,
-                                           get_VOC_segmentation_datasets)
+from ricomodels.utils.data_loading import (
+    get_carvana_datasets,
+    get_data_loader,
+    get_gta5_datasets,
+    get_package_dir,
+    get_VOC_segmentation_datasets,
+)
 from ricomodels.utils.losses import DiceLoss, FocalLoss, dice_loss
-from ricomodels.utils.training_tools import (EarlyStopping,
-                                             check_model_image_channel_num,
-                                             eval_model)
-from ricomodels.utils.visualization import (TrainingTimer,
-                                            get_total_weight_norm,
-                                            wandb_weight_histogram_logging)
+from ricomodels.utils.training_tools import (
+    EarlyStopping,
+    check_model_image_channel_num,
+    eval_model,
+)
+from ricomodels.utils.visualization import (
+    TrainingTimer,
+    get_total_weight_norm,
+    wandb_weight_histogram_logging,
+)
 from torch import optim
 from tqdm import tqdm
 

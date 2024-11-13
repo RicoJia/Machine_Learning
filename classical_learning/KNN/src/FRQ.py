@@ -1,26 +1,30 @@
-from load_movielens import load_movielens_data
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+from load_movielens import load_movielens_data
 
-def collaborative_filtering(input_array, n_neighbors,
-                            distance_measure='euclidean', aggregator='mode'):
+
+def collaborative_filtering(
+    input_array, n_neighbors, distance_measure="euclidean", aggregator="mode"
+):
 
     impute_array = np.zeros(input_array.shape[1])
     cp_input_array = np.copy(input_array)
     cp2_input_array = np.copy(input_array)
     for cln_num in range(cp_input_array.shape[1]):
-        sorted_cln = cp2_input_array[:,cln_num]
+        sorted_cln = cp2_input_array[:, cln_num]
         sorted_cln.sort()
-        first_non_zero_index = (sorted_cln==0).sum()
-        k_neighbors = sorted_cln[first_non_zero_index:first_non_zero_index+n_neighbors]
+        first_non_zero_index = (sorted_cln == 0).sum()
+        k_neighbors = sorted_cln[
+            first_non_zero_index : first_non_zero_index + n_neighbors
+        ]
         k_neighbors_ls = k_neighbors.tolist()
-        if aggregator=='mode':
+        if aggregator == "mode":
             impute_array[cln_num] = max(set(k_neighbors_ls), key=k_neighbors_ls.count)
 
-        elif aggregator == 'mean':
-            impute_array[cln_num] = k_neighbors.sum()/k_neighbors.shape[0]
-        elif aggregator == 'median':
-            impute_array[cln_num] = k_neighbors_ls[int(k_neighbors.shape[0]/2)]
+        elif aggregator == "mean":
+            impute_array[cln_num] = k_neighbors.sum() / k_neighbors.shape[0]
+        elif aggregator == "median":
+            impute_array[cln_num] = k_neighbors_ls[int(k_neighbors.shape[0] / 2)]
 
         for row_num in range(input_array.shape[0]):
             if cp_input_array[row_num][cln_num] == 0:
@@ -31,20 +35,21 @@ def collaborative_filtering(input_array, n_neighbors,
 
 def sub_0(new_array, original_array, N_nominal):
     N_min = np.min(np.count_nonzero(original_array, axis=1))
-    N = N_min if N_min<N_nominal else N_nominal
+    N = N_min if N_min < N_nominal else N_nominal
 
-    subed_new_array= np.copy(new_array)
+    subed_new_array = np.copy(new_array)
     for row_num in range(new_array.shape[0]):
-        nonzero_indices =np.array( np.where(original_array[row_num] != 0)[0])
+        nonzero_indices = np.array(np.where(original_array[row_num] != 0)[0])
         np.random.shuffle(nonzero_indices)
         to_delete_indices = nonzero_indices[:N]
 
         for n in to_delete_indices:
             subed_new_array[row_num, n] = 0
-    return subed_new_array, N*new_array.shape[0]
+    return subed_new_array, N * new_array.shape[0]
+
 
 def get_MSE(estimates, targets, imputed_num):
-    '''
+    """
     Mean squared error measures the average of the square of the errors (the
     average squared difference between the estimated values and what is
     estimated. The formula is:
@@ -58,13 +63,14 @@ def get_MSE(estimates, targets, imputed_num):
     Output: Mean Square Error
 
     this does not work if you have a matrix!
-    '''
+    """
     n = estimates.shape[0]
     m = estimates.shape[1]
-    mse = np.sqrt(((targets - estimates) ** 2).sum() /imputed_num)
+    mse = np.sqrt(((targets - estimates) ** 2).sum() / imputed_num)
 
-    #mse = np.sqrt(1.0/m*1.0/n*(((targets-estimates)*(targets-estimates)).sum()))
+    # mse = np.sqrt(1.0/m*1.0/n*(((targets-estimates)*(targets-estimates)).sum()))
     return mse
+
 
 def collab_MSE(N, K, D, A, new_array, old_array):
 
@@ -74,20 +80,22 @@ def collab_MSE(N, K, D, A, new_array, old_array):
 
     return MSE
 
+
 def main():
-    #load data
+    # load data
     array = load_movielens_data("../data")
     new_array = np.copy(array)
 
-    #fill in all zeros with median of the same row
+    # fill in all zeros with median of the same row
     for row_num in range(new_array.shape[0]):
-        median = np.median(np.array([i for i in new_array[row_num,:] if i!=0]))
-        new_array[row_num,:] = np.where(new_array[row_num,:]==0, median, new_array[row_num,:])
+        median = np.median(np.array([i for i in new_array[row_num, :] if i != 0]))
+        new_array[row_num, :] = np.where(
+            new_array[row_num, :] == 0, median, new_array[row_num, :]
+        )
 
-    D_arr = ['euclidean', 'manhattan', 'cosine']
-    A_arr = ['mode', 'mean', 'median']
+    D_arr = ["euclidean", "manhattan", "cosine"]
+    A_arr = ["mode", "mean", "median"]
     MSE_arr = np.array([])
-
 
     # question 7
     # total_val = (array.shape[0]-1)*(array.shape[0])/2
@@ -106,9 +114,7 @@ def main():
     # # print("Q7 - mean: ", mean)
     # print("Q7 - mean: ", median)
 
-
-
-    #question 8
+    # question 8
     # N_arr = [5, 10, 20, 40]
     # K = 3
     # D = D_arr[0]
@@ -153,11 +159,11 @@ def main():
     # plt.ylabel("MSE")
     # plt.savefig("Question10.png")
 
-    #question 11
+    # question 11
     N = 1
-    D = 'manhattan'
+    D = "manhattan"
     K = 31
-    A_arr = ['mean', 'mode', 'median']
+    A_arr = ["mean", "mode", "median"]
     for A in A_arr:
         MSE = collab_MSE(N, K, D, A, new_array, array)
         print("MSE: ", MSE)
@@ -167,5 +173,6 @@ def main():
     plt.xlabel("Aggregator")
     plt.ylabel("MSE")
     plt.savefig("Question11.png")
+
 
 main()

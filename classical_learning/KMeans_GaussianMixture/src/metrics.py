@@ -1,6 +1,7 @@
 import numpy as np
 from sklearn.metrics import adjusted_mutual_info_score
 
+
 def adjusted_mutual_info(predicted_labels, predicted_targets):
     """
     Adjusted mutual info score is a metric used to judge the quality of a clustering

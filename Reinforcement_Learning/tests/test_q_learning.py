@@ -11,7 +11,9 @@ def test_q_learning_slots():
 
     np.random.seed(0)
 
-    env = gym.make('SlotMachines-v0', n_machines=10, mean_range=(-10, 10), std_range=(5, 10))
+    env = gym.make(
+        "SlotMachines-v0", n_machines=10, mean_range=(-10, 10), std_range=(5, 10)
+    )
     env.seed(0)
     means = np.array([m.mean for m in env.machines])
 
@@ -27,6 +29,7 @@ def test_q_learning_slots():
     assert len(states) == 1 and states[0] == 0
     assert len(rewards) == 1
 
+
 def test_q_learning_frozen_lake():
     """
     Tests that the QLearning implementation successfully learns the
@@ -36,7 +39,7 @@ def test_q_learning_frozen_lake():
 
     np.random.seed(0)
 
-    env = gym.make('FrozenLake-v0')
+    env = gym.make("FrozenLake-v0")
     env.seed(0)
 
     agent = QLearning(epsilon=0.2, discount=0.95)
@@ -60,31 +63,32 @@ def test_q_learning_deterministic():
 
     np.random.seed(0)
 
-    env = gym.make('FrozonLakeNoSlippery-v0')
+    env = gym.make("FrozonLakeNoSlippery-v0")
     env.seed(0)
 
     agent = QLearning(epsilon=0.5, discount=0.95)
-    state_action_values = np.array([
-        [0.0, 0.7, 0.3, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.51, 0.49, 0.0],
-        [0.0, 0.0, 0.0, 0.0],
-        [0.5, 0.0, 0.5, 0.0],
-        [0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.2, 0.8, 0.0],
-        [0.0, 0.2, 0.8, 0.0],
-        [0.0, 0.6, 0.4, 0.0],
-        [0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0]
-    ])
+    state_action_values = np.array(
+        [
+            [0.0, 0.7, 0.3, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.51, 0.49, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.5, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.2, 0.8, 0.0],
+            [0.0, 0.2, 0.8, 0.0],
+            [0.0, 0.6, 0.4, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ]
+    )
 
     states, actions, rewards = agent.predict(env, state_action_values)
     assert np.all(states == np.array([4, 8, 9, 10, 14, 15]))
     assert np.all(actions == np.array([1, 1, 2, 2, 1, 2]))
     assert np.all(rewards == np.array([0, 0, 0, 0, 0, 1]))
-

@@ -1,8 +1,8 @@
 #!/usr/env/bin python3
 
 import torch
-import torch.nn as nn
 import torch.functional as F
+import torch.nn as nn
 
 # TODO
 
@@ -17,12 +17,15 @@ def focal_loss(outputs, targets, gamma):
     # (n, h, w)
     p_true_class = probs.gather(1, targets.unsqueeze(1)).squeeze(1)
     log_p_true_class = torch.log(p_true_class + 1e-8)
-    fl = -(1 - p_true_class)**gamma * (log_p_true_class)
+    fl = -((1 - p_true_class) ** gamma) * (log_p_true_class)
     return fl.mean()
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=8, ):
+    def __init__(
+        self,
+        gamma=8,
+    ):
         super().__init__()
         self._gamma = gamma
 

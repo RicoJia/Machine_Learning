@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
+import argparse
+import importlib.util
+import os
+import shutil
+
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
-import importlib.util
-import shutil
-import os
-import argparse
-
 from google_drive_upload import authenticate, upload_file
 
 HELP_STR = """
@@ -18,15 +18,19 @@ THIS_PACKAGE = "ricomodels"
 def find_this_pkg_path():
     spec = importlib.util.find_spec(THIS_PACKAGE)
     if spec is None:
-        raise FileExistsError(f"Package {THIS_PACKAGE} is not installed yet. Please install using pip")
+        raise FileExistsError(
+            f"Package {THIS_PACKAGE} is not installed yet. Please install using pip"
+        )
     else:
         return os.path.dirname(spec.origin)
 
 
 def get_or_prompt_file_name():
     parser = argparse.ArgumentParser(description=HELP_STR)
-    parser.add_argument('--file', '-f', type=str, default='', help='Filename to upload')
-    parser.add_argument('--directory', '-r', type=str, default='', help='Filename to upload')
+    parser.add_argument("--file", "-f", type=str, default="", help="Filename to upload")
+    parser.add_argument(
+        "--directory", "-r", type=str, default="", help="Filename to upload"
+    )
     args = parser.parse_args()
 
     while args.file == "" and args.directory == "":
@@ -66,7 +70,7 @@ def upload_file_to_s3(file_name, bucket, object_key=None):
     print(object_key)
 
     # Create an S3 client
-    s3_client = boto3.client('s3')
+    s3_client = boto3.client("s3")
 
     try:
         # Upload the file
@@ -88,8 +92,8 @@ def upload_file_to_s3(file_name, bucket, object_key=None):
 
 
 if __name__ == "__main__":
-    file_path = 'losses.py'  # Replace with your file path
-    bucket_name = 'rico-machine-learning-weights'         # Replace with your bucket name
+    file_path = "losses.py"  # Replace with your file path
+    bucket_name = "rico-machine-learning-weights"  # Replace with your bucket name
 
     file_path = ""
     while file_path == "":
@@ -99,7 +103,7 @@ if __name__ == "__main__":
 
     print(file_path)
     if args.directory:
-        file_path = shutil.make_archive(file_path, 'zip', file_path)
+        file_path = shutil.make_archive(file_path, "zip", file_path)
     object_key = os.path.relpath(file_path, pkg_path)
 
     # upload_file_to_s3(file_path, bucket_name, object_key)

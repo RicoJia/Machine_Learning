@@ -1,8 +1,9 @@
 import numpy as np
-from src import KMeans
 from scipy.stats import multivariate_normal
+from src import KMeans
 
-class GMM():
+
+class GMM:
     def __init__(self, n_clusters, covariance_type):
         """
         This class implements a Gaussian Mixture Model updated using expectation
@@ -39,7 +40,7 @@ class GMM():
 
         """
         self.n_clusters = n_clusters
-        allowed_covariance_types = ['spherical', 'diagonal']
+        allowed_covariance_types = ["spherical", "diagonal"]
         # if covariance_type not in allowed_covariance_types:
         #     raise ValueError(f'covariance_type must be in {allowed_covariance_types}')
         self.covariance_type = covariance_type
@@ -73,18 +74,20 @@ class GMM():
         self.mixing_weights /= np.sum(self.mixing_weights)
 
         # 4. Compute log_likelihood under initial random covariance and KMeans means.
-        prev_log_likelihood = -float('inf')
+        prev_log_likelihood = -float("inf")
         log_likelihood = self._overall_log_likelihood(features)
 
         # 5. While the log_likelihood is increasing significantly, or max_iterations has
         # not been reached, continue EM until convergence.
         n_iter = 0
-        while log_likelihood - prev_log_likelihood > 1e-4 and n_iter < self.max_iterations:
+        while (
+            log_likelihood - prev_log_likelihood > 1e-4 and n_iter < self.max_iterations
+        ):
             prev_log_likelihood = log_likelihood
 
             assignments = self._e_step(features)
-            self.means, self.covariances, self.mixing_weights = (
-                self._m_step(features, assignments)
+            self.means, self.covariances, self.mixing_weights = self._m_step(
+                features, assignments
             )
             log_likelihood = self._overall_log_likelihood(features)
             # print("----------------")
@@ -114,7 +117,7 @@ class GMM():
             1. Calculate the log_likelihood of each point under each Gaussian.
             2. Calculate the posterior probability for each point under each Gaussian
             3. Return the posterior probability (assignments).
-        
+
         This function should call your implementation of _log_likelihood (which should call
         multvariate_normal.logpdf). This should use the Gaussian parameter contained in
         self.means, self.covariance, and self.mixing_weights
@@ -129,26 +132,28 @@ class GMM():
         """
         all_posteriors = np.zeros((self.n_clusters, features.shape[0]))
 
-        #calculate posteriors for all points, all gaussians
+        # calculate posteriors for all points, all gaussians
         for i_feature in range(features.shape[0]):
             for k_idx in range(self.n_clusters):
-                numerator = self._log_likelihood(features[i_feature, :].reshape(1, features.shape[1]), k_idx) #number
+                numerator = self._log_likelihood(
+                    features[i_feature, :].reshape(1, features.shape[1]), k_idx
+                )  # number
 
-                #sum of log probability of the same feature, all gaussians.
+                # sum of log probability of the same feature, all gaussians.
                 sum_prob = 0.0
                 for k_idx_2 in range(self.n_clusters):
-                    sum_prob += self._log_likelihood(features[i_feature, :].reshape(1, features.shape[1]), k_idx_2)
-                #gamma_jn = numerator/denom
-                all_posteriors[k_idx, i_feature] = numerator/sum_prob
+                    sum_prob += self._log_likelihood(
+                        features[i_feature, :].reshape(1, features.shape[1]), k_idx_2
+                    )
+                # gamma_jn = numerator/denom
+                all_posteriors[k_idx, i_feature] = numerator / sum_prob
 
             # log_likelihood_vec = self._log_likelihood(features, k_idx)
             # all_posteriors[:, k_idx] = log_likelihood_vec/np.sum(log_likelihood_vec)
 
-
         for k_idx in range(self.n_clusters):
             all_posteriors[k_idx, :] = self._posterior(features, k_idx)
         return all_posteriors
-
 
     def _m_step(self, features, assignments):
         """
@@ -159,11 +164,11 @@ class GMM():
             2. Update the mixing_weights with the w_j update in Slide 24
             3. Update the covariance matrix with the sigma_j update in Slide 24.
 
-        Slide 24 is in these slides: 
+        Slide 24 is in these slides:
             https://github.com/NUCS349/nucs349.github.io/blob/master/lectures/eecs349_gaussian_mixture_models.pdf
 
         NOTE: When updating the parameters of the Gaussian you always use the output of
-        the E step taken before this M step (e.g. update the means, mixing_weights, and covariances 
+        the E step taken before this M step (e.g. update the means, mixing_weights, and covariances
         simultaneously).
 
         Arguments:
@@ -177,40 +182,47 @@ class GMM():
             covariances -- Updated covariances
             mixing_weights -- Updated mixing weights
         """
-        #Responsibility (Gamma) for one cluster = sum of posteriors of that cluster
-        responsibility_vec = np.array([np.sum( assignments[i_cluster, :] ) for i_cluster in range(self.n_clusters)])
+        # Responsibility (Gamma) for one cluster = sum of posteriors of that cluster
+        responsibility_vec = np.array(
+            [np.sum(assignments[i_cluster, :]) for i_cluster in range(self.n_clusters)]
+        )
 
-        #N = total number of points
+        # N = total number of points
         N = features.shape[0]
 
-        #wj = responsibility/N
+        # wj = responsibility/N
         wj = np.copy(responsibility_vec)
-        wj = wj/N
+        wj = wj / N
 
-        #miu_j = sum(gamma_j_i * x_i) / responsibility_j
-        means = np.zeros((self.n_clusters, features.shape[1] ))
+        # miu_j = sum(gamma_j_i * x_i) / responsibility_j
+        means = np.zeros((self.n_clusters, features.shape[1]))
         sigma_copy = np.copy(self.covariances)
 
         for i_cluster in range(self.n_clusters):
 
-            #cluster_vec = [[gamma_j_1 * x_1], [gamma_j_2 * x_2] ...]
-            cluster_vec =  [ assignments[ i_cluster, i_feature] * features[i_feature, :] for i_feature in range(features.shape[0])]
-            means[i_cluster,:] = np.sum( cluster_vec, axis=0 )/responsibility_vec[i_cluster]
+            # cluster_vec = [[gamma_j_1 * x_1], [gamma_j_2 * x_2] ...]
+            cluster_vec = [
+                assignments[i_cluster, i_feature] * features[i_feature, :]
+                for i_feature in range(features.shape[0])
+            ]
+            means[i_cluster, :] = (
+                np.sum(cluster_vec, axis=0) / responsibility_vec[i_cluster]
+            )
 
-            #sigma_j: sum of (gamma_ji * [x_i-miu_j][x_i-miu_j]^T) / responsibility (Gamma_j)
-            #TODO: should we use the old means or the new means?
+            # sigma_j: sum of (gamma_ji * [x_i-miu_j][x_i-miu_j]^T) / responsibility (Gamma_j)
+            # TODO: should we use the old means or the new means?
             miu_j = self.means[i_cluster, :].reshape(features.shape[1], 1)
-            #TODO: not sure if this is the correct way?
+            # TODO: not sure if this is the correct way?
             sigma_temp = np.zeros((features.shape[1], features.shape[1]))
             # sigma for one x_i
             for i_feature in range(features.shape[0]):
                 x_i = features[i_feature, :].reshape(features.shape[1], 1)
                 gamma_ji = assignments[i_cluster, i_feature]
                 Gamma_j = responsibility_vec[i_cluster]
-                sigma_temp_i = gamma_ji * (x_i - miu_j).dot((x_i - miu_j).T)/Gamma_j
+                sigma_temp_i = gamma_ji * (x_i - miu_j).dot((x_i - miu_j).T) / Gamma_j
                 sigma_temp = sigma_temp + sigma_temp_i
 
-            #update your sigma with the new sigma_temp value
+            # update your sigma with the new sigma_temp value
             sigma_copy = self.update_covariance(sigma_copy, sigma_temp, i_cluster)
 
         # self.mixing_weights = wj
@@ -237,9 +249,9 @@ class GMM():
         Returns:
             [np.ndarray] -- Initial covariances (use np.random.rand)
         """
-        if self.covariance_type == 'spherical':
+        if self.covariance_type == "spherical":
             return np.random.rand(self.n_clusters)
-        elif self.covariance_type == 'diagonal':
+        elif self.covariance_type == "diagonal":
             return np.random.rand(self.n_clusters, n_features)
 
     def update_covariance(self, sigma_copy, sigma_temp, k_idx):
@@ -255,7 +267,7 @@ class GMM():
         """
         if self.covariance_type == "spherical":
             sigma_copy[k_idx] = np.mean(sigma_temp.diagonal())
-        elif self.covariance_type == 'diagonal':
+        elif self.covariance_type == "diagonal":
             sigma_copy[k_idx, :] = sigma_temp.diagonal()
 
         return sigma_copy
@@ -270,7 +282,7 @@ class GMM():
         """
         if self.covariance_type == "spherical":
             return np.identity(n_features) * self.covariances[k_idx]
-        elif self.covariance_type == 'diagonal':
+        elif self.covariance_type == "diagonal":
             cov = np.zeros((n_features, n_features))
             for i in range(n_features):
                 cov[i, i] = self.covariances[k_idx, i]
@@ -306,25 +318,27 @@ class GMM():
         """
 
         # initialize return vector, which [n_samples, 1]
-        ret_vec = np.zeros( features.shape[0] )
+        ret_vec = np.zeros(features.shape[0])
 
         # log(mixing_weight) + logpdf for each feature vector
         for i_vec in range(features.shape[0]):
-            rv = multivariate_normal(self.means[k_idx, :], self.get_cluster_covariance(k_idx, features.shape[-1]))
-            ret_vec[ i_vec ] = rv.logpdf( features[i_vec, :] ) + np.log( self.mixing_weights[k_idx] )    #use rv. logpdf
+            rv = multivariate_normal(
+                self.means[k_idx, :],
+                self.get_cluster_covariance(k_idx, features.shape[-1]),
+            )
+            ret_vec[i_vec] = rv.logpdf(features[i_vec, :]) + np.log(
+                self.mixing_weights[k_idx]
+            )  # use rv. logpdf
 
-            if (self.mixing_weights[k_idx] == 0):
+            if self.mixing_weights[k_idx] == 0:
                 pass
             #     print("---log weights: ", self.mixing_weights[k_idx])
             #     print("---log features: ", features[i_vec, :])
 
         return ret_vec
 
-
     def _overall_log_likelihood(self, features):
-        denom = [
-            self._log_likelihood(features, j) for j in range(self.n_clusters)
-        ]
+        denom = [self._log_likelihood(features, j) for j in range(self.n_clusters)]
         return np.sum(denom)
 
     def _posterior(self, features, k):
@@ -344,10 +358,9 @@ class GMM():
                 (n_samples,).
         """
         num = self._log_likelihood(features, k)
-        denom = np.array([
-            self._log_likelihood(features, j)
-            for j in range(self.n_clusters)
-        ])
+        denom = np.array(
+            [self._log_likelihood(features, j) for j in range(self.n_clusters)]
+        )
 
         # Below is a useful function for safely computing large exponentials. It's a common
         # machine learning trick called the logsumexp trick:

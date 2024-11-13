@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-
 from RicoNeuralNetPrototype.utils.input_data import (
     generate_circles_within_circles,
     generate_gaussian_mixtures,

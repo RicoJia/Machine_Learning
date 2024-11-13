@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class Regularization:
     """
     Abstract base class for regularization terms in gradient descent.
@@ -67,7 +68,8 @@ class L1Regularization(Regularization):
             regularization_term - (float) The value of the regularization term
                 evaluated at w.
         """
-        return self.reg_param * np.sum( abs(w[:-1   ]) )
+        return self.reg_param * np.sum(abs(w[:-1]))
+
     def backward(self, w):
         """
         Implements the backward pass through the regularization term. The
@@ -83,6 +85,7 @@ class L1Regularization(Regularization):
                 gradient of the regularization term evaluated at w.
         """
         return self.reg_param * np.append(np.sign(w[:-1]), 0)
+
 
 class L2Regularization(Regularization):
     """
@@ -106,7 +109,7 @@ class L2Regularization(Regularization):
             which is sign(w), 0 for bias
 
         """
-        return 0.5*self.reg_param * np.sum( w[:-1]**2 )
+        return 0.5 * self.reg_param * np.sum(w[:-1] ** 2)
 
     def backward(self, w):
         """

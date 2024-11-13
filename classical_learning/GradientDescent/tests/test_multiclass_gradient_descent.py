@@ -14,8 +14,9 @@ def test_multiclass_gradient_descent_separable():
     features = np.identity(4)
     targets = np.array(range(4))
 
-    learner = MultiClassGradientDescent(loss='squared', regularization=None,
-                                        learning_rate=0.01, reg_param=0.05)
+    learner = MultiClassGradientDescent(
+        loss="squared", regularization=None, learning_rate=0.01, reg_param=0.05
+    )
     learner.fit(features, targets, batch_size=None, max_iter=1000)
     predictions = learner.predict(features)
 
@@ -30,17 +31,17 @@ def test_multiclass_gradient_descent_blobs():
 
     np.random.seed(0)
 
-    features, _, targets, _ = load_data('blobs')
+    features, _, targets, _ = load_data("blobs")
 
-    learner = MultiClassGradientDescent(loss='squared', regularization=None,
-                                        learning_rate=0.01, reg_param=0.05)
+    learner = MultiClassGradientDescent(
+        loss="squared", regularization=None, learning_rate=0.01, reg_param=0.05
+    )
     learner.fit(features, targets, batch_size=None, max_iter=1000)
     predictions = learner.predict(features)
 
     print("predictions: ", predictions)
     print("targets: ", targets)
     assert np.all(predictions == targets)
-
 
 
 def test_multiclass_gradient_descent_mnist():
@@ -52,11 +53,13 @@ def test_multiclass_gradient_descent_mnist():
 
     np.random.seed(0)
 
-    train_features, test_features, train_targets, test_targets = \
-        load_data('mnist-multiclass', fraction=0.8)
+    train_features, test_features, train_targets, test_targets = load_data(
+        "mnist-multiclass", fraction=0.8
+    )
 
-    learner = MultiClassGradientDescent(loss='squared', regularization=None,
-                                        learning_rate=0.01, reg_param=0.05)
+    learner = MultiClassGradientDescent(
+        loss="squared", regularization=None, learning_rate=0.01, reg_param=0.05
+    )
     learner.fit(train_features, train_targets, batch_size=None, max_iter=1000)
     predictions = learner.predict(test_features)
 

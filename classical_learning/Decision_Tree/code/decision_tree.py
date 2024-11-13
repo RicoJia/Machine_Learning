@@ -1,6 +1,10 @@
 import numpy as np
-class Tree():
-    def __init__(self, value=None, attribute_name="root", attribute_index=None, branches=None):
+
+
+class Tree:
+    def __init__(
+        self, value=None, attribute_name="root", attribute_index=None, branches=None
+    ):
         """
         This class implements a tree structure with multiple branches at each node.
         If self.branches is an empty list, this is a leaf node and what is contained in
@@ -24,7 +28,8 @@ class Tree():
         self.attribute_index = attribute_index
         self.value = value
 
-class DecisionTree():
+
+class DecisionTree:
     def __init__(self, attribute_names):
         """
         TODO: Implement this class.
@@ -54,7 +59,6 @@ class DecisionTree():
         self.attribute_names = attribute_names
         self.tree = None
 
-
     def _check_input(self, features):
         if features.shape[1] != len(self.attribute_names):
             raise ValueError(
@@ -73,60 +77,71 @@ class DecisionTree():
         """
         self._check_input(features)
 
-
-        if if_no_attribute(self.attribute_names):     #running out of attributes but you still have examples, now you should return the mode of examples
+        if if_no_attribute(
+            self.attribute_names
+        ):  # running out of attributes but you still have examples, now you should return the mode of examples
             tree = Tree(
                 attribute_name="root",
                 attribute_index=None,
                 value=find_mode(targets),
-                branches=[]
+                branches=[],
             )
             return tree
 
-        if  np.array_equal(targets[1:], targets[:-1]): #3. all targets are the same or there's only one single value
+        if np.array_equal(
+            targets[1:], targets[:-1]
+        ):  # 3. all targets are the same or there's only one single value
             tree = Tree(
                 attribute_name="root",
                 attribute_index=None,
                 value=(targets)[0],
-                branches=[]
+                branches=[],
             )
             return tree
         else:
-            attribute = find_best_attribute(features, self.attribute_names, targets)    #if all there are multiple attributes but they are garbage, we should stop and return the mode
+            attribute = find_best_attribute(
+                features, self.attribute_names, targets
+            )  # if all there are multiple attributes but they are garbage, we should stop and return the mode
             tree = Tree(
-                attribute_name= attribute,   #I can set none to attribute_names that have been used. But you should never delete an attribute name
+                attribute_name=attribute,  # I can set none to attribute_names that have been used. But you should never delete an attribute name
                 attribute_index=self.attribute_names.index(attribute),
                 value=find_mode(targets),
-                branches=[]
+                branches=[],
             )
             if attribute != None:
-                features_high , targets_high, features_low, targets_low = split_features_targets(features, targets, tree.attribute_index)   #TODO
+                features_high, targets_high, features_low, targets_low = (
+                    split_features_targets(features, targets, tree.attribute_index)
+                )  # TODO
 
                 leaf_node = Tree(
-                    attribute_name= attribute,
+                    attribute_name=attribute,
                     attribute_index=0,
                     value=find_mode(targets),
-                    branches=[]
+                    branches=[],
                 )
 
-                self.attribute_names[tree.attribute_index]=None         #remove the attribute name for the first tree!
+                self.attribute_names[tree.attribute_index] = (
+                    None  # remove the attribute name for the first tree!
+                )
 
-                if len(targets_low) == 0:       #empty target lists
+                if len(targets_low) == 0:  # empty target lists
                     tree.branches.append(leaf_node)
                 else:
 
-                    tree.branches.append(self.fit(features_low, targets_low))       #the tree's branches will be [tree_for_low_value, tree_for_high_value]
+                    tree.branches.append(
+                        self.fit(features_low, targets_low)
+                    )  # the tree's branches will be [tree_for_low_value, tree_for_high_value]
 
                 if len(targets_high) == 0:
                     tree.branches.append(leaf_node)
                 else:
-                    tree.branches.append(self.fit(features_high,targets_high))
+                    tree.branches.append(self.fit(features_high, targets_high))
 
-                self.attribute_names[tree.attribute_index]=attribute         #recover the name so the other branch of the parent node will have the same set of inputs!!
-
+                self.attribute_names[tree.attribute_index] = (
+                    attribute  # recover the name so the other branch of the parent node will have the same set of inputs!!
+                )
 
             return tree
-
 
     def predict(self, features):
         """
@@ -144,15 +159,16 @@ class DecisionTree():
 
         for index in range(len(features)):
             current_node = self.tree
-            if current_node!= None:
+            if current_node != None:
                 while len(current_node.branches):
-                    if features[index,current_node.attribute_index]==1:  #the example's feature corresponding to the attribute index is High
+                    if (
+                        features[index, current_node.attribute_index] == 1
+                    ):  # the example's feature corresponding to the attribute index is High
                         current_node = current_node.branches[1]
-                    else:                       #the example's feature corresponding to the attribute index is High
+                    else:  # the example's feature corresponding to the attribute index is High
                         current_node = current_node.branches[0]
                 predicted_target = np.append(predicted_target, current_node.value)
         return predicted_target
-
 
     def _visualize_helper(self, tree, level):
         """
@@ -173,48 +189,54 @@ class DecisionTree():
         self._visualize_helper(branch, level)
 
         for branch in branch.branches:
-            self.visualize(branch, level+1)
+            self.visualize(branch, level + 1)
+
 
 def if_no_attribute(attribute_names):
-    return len([False for attribute in attribute_names if attribute is not None ]) == 0
+    return len([False for attribute in attribute_names if attribute is not None]) == 0
+
 
 def find_mode(targets):
     _targets = (np.copy(targets)).tolist()
-    return max(set(_targets), key = _targets.count)
+    return max(set(_targets), key=_targets.count)
+
 
 def split_features_targets(features, targets, attribute_index):
-    '''
+    """
     Split features table according to high and low values of an attribute_index.
     Also, split targets with the same row numbers.
-    '''
-    features_high = np.empty((0,len(features[0])),float)
-    features_low = np.empty((0,len(features[0])),float)
+    """
+    features_high = np.empty((0, len(features[0])), float)
+    features_low = np.empty((0, len(features[0])), float)
     targets_high = np.array([])
     targets_low = np.array([])
 
-    for index, val in np.ndenumerate(features[:,attribute_index]):
+    for index, val in np.ndenumerate(features[:, attribute_index]):
         if val == 1:
-            features_high = np.vstack((features_high, features[index,:]))
+            features_high = np.vstack((features_high, features[index, :]))
             targets_high = np.append(targets_high, targets[index])
         else:
-            features_low =np.vstack((features_low, features[index,:]))
+            features_low = np.vstack((features_low, features[index, :]))
             targets_low = np.append(targets_low, targets[index])
-    return features_high , targets_high, features_low, targets_low
+    return features_high, targets_high, features_low, targets_low
+
 
 def find_best_attribute(features, attribute_names, targets):
-    '''Return the best attribute name.
+    """Return the best attribute name.
     Args:
         self.attribute_names (list that contains names or none)
         features: 2D np array
         targets: examples
-    '''
-    look_up_dict= {}
+    """
+    look_up_dict = {}
     for i in range(len(attribute_names)):
-        if attribute_names[i]!=None:
-            look_up_dict[attribute_names[i]]=information_gain(features, i, targets)
+        if attribute_names[i] != None:
+            look_up_dict[attribute_names[i]] = information_gain(features, i, targets)
 
     sorted_look_up = sorted(look_up_dict.items(), key=lambda x: -x[1])
-    if sorted_look_up[0][0]!= 0:        #if attributes are garbage, you'll get info gain zero
+    if (
+        sorted_look_up[0][0] != 0
+    ):  # if attributes are garbage, you'll get info gain zero
         return sorted_look_up[0][0]
     else:
         return None
@@ -232,54 +254,62 @@ def information_gain(features, attribute_index, targets):
         information_gain (float): information gain if the features were split on the
             attribute_index.
     """
-    p1 = np.sum(targets)/len(targets)
-    p2 = 1.0-p1
-    H_s = -p1*np.log2(p1)-p2*np.log2(p2) #use targets
+    p1 = np.sum(targets) / len(targets)
+    p2 = 1.0 - p1
+    H_s = -p1 * np.log2(p1) - p2 * np.log2(p2)  # use targets
 
-    high_yes= 0
+    high_yes = 0
     high_No = 0
     low_yes = 0
     low_no = 0
-    for index, feature_val in np.ndenumerate(features[:,attribute_index]):
-        if feature_val==1:
+    for index, feature_val in np.ndenumerate(features[:, attribute_index]):
+        if feature_val == 1:
             if targets[index] == 1:
-                high_yes+=1
+                high_yes += 1
             else:
-                high_No+=1
+                high_No += 1
         else:
             if targets[index] == 1:
-                low_yes+=1
+                low_yes += 1
             else:
-                low_no+=1
+                low_no += 1
 
-    num_high = high_yes+high_No
-    num_low = low_no+low_yes
+    num_high = high_yes + high_No
+    num_low = low_no + low_yes
 
-
-
-    if num_high == 0:           #If unfortunately your features are all low, then this feature is useless. So info gain, the output should be zero
+    if (
+        num_high == 0
+    ):  # If unfortunately your features are all low, then this feature is useless. So info gain, the output should be zero
         return 0
     else:
-        p_high_yes = high_yes/num_high
-        p_high_no = high_No/num_high
-        if p_high_yes==0 or p_high_no==0:
+        p_high_yes = high_yes / num_high
+        p_high_no = high_No / num_high
+        if p_high_yes == 0 or p_high_no == 0:
             H_s_high = 0
         else:
-            H_s_high = num_high/len(targets)* (-p_high_yes*np.log2(p_high_yes)-p_high_no*np.log2(p_high_no))
+            H_s_high = (
+                num_high
+                / len(targets)
+                * (-p_high_yes * np.log2(p_high_yes) - p_high_no * np.log2(p_high_no))
+            )
 
     if num_low == 0:
         return 0
     else:
-        p_low_yes = low_yes/num_low
-        p_low_no = low_no/num_low
-        if p_low_yes==0 or p_low_no==0:
+        p_low_yes = low_yes / num_low
+        p_low_no = low_no / num_low
+        if p_low_yes == 0 or p_low_no == 0:
             H_s_low = 0
         else:
-            H_s_low = num_low/len(targets)*(-p_low_yes*np.log2(p_low_yes)- p_low_no*np.log2(p_low_no))
+            H_s_low = (
+                num_low
+                / len(targets)
+                * (-p_low_yes * np.log2(p_low_yes) - p_low_no * np.log2(p_low_no))
+            )
 
-    H_sa =  H_s_high+H_s_low
+    H_sa = H_s_high + H_s_low
 
-    return H_s-H_sa
+    return H_s - H_sa
 
 
 # if __name__ == '__main__':

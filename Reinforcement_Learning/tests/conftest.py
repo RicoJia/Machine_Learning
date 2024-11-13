@@ -1,8 +1,10 @@
-import pytest
-import pprint
 import json
 import os
+import pprint
+
 import numpy as np
+import pytest
+
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
@@ -18,18 +20,21 @@ def pytest_runtest_makereport(item, call):
     # be "setup", "call", "teardown"
     setattr(item, "rep_" + rep.when, rep)
 
+
 def load_json(json_path):
     if not os.path.isfile(json_path):
         return {}
-    with open(json_path, 'r') as f:
+    with open(json_path, "r") as f:
         data = json.load(f)
     return data
 
+
 def save_json(data, json_path):
-    with open(json_path, 'w') as f:
+    with open(json_path, "w") as f:
         json.dump(data, f, indent=4)
 
-@pytest.fixture(scope='function', autouse=True)
+
+@pytest.fixture(scope="function", autouse=True)
 def log_test_result(request):
     """
     This function logs the result of each test case to tests/test_result.json.
@@ -38,10 +43,11 @@ def log_test_result(request):
     for the submission.
     """
     yield
-    test_result = load_json('tests/test_result.json')
+    test_result = load_json("tests/test_result.json")
     test_passed = not request.node.rep_call.failed
     test_result[request.node.name] = test_passed
-    save_json(test_result, 'tests/test_result.json')
+    save_json(test_result, "tests/test_result.json")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def grade_assignment(request):
@@ -120,48 +126,38 @@ def grade_assignment(request):
     other disqualifying behavior is discovered.
     """
     yield
-    test_result = load_json('tests/test_result.json')
-    rubric = load_json('tests/rubric.json')
-    report = {
-        'score': 0,
-        'tests_passed': 0,
-        'notes': {}
-    }
+    test_result = load_json("tests/test_result.json")
+    rubric = load_json("tests/rubric.json")
+    report = {"score": 0, "tests_passed": 0, "notes": {}}
     total = 0
     tests_passed = 0
     total_tests = 0
 
     for name, result in test_result.items():
         if name in rubric:
-            if rubric[name]['weight'] == 'required':
+            if rubric[name]["weight"] == "required":
                 if not result:
-                    report['score'] = 0
-                    report['notes'][name] = (
-                        f'FAIL - REQUIRED (automatic zero)'
-                    )
+                    report["score"] = 0
+                    report["notes"][name] = f"FAIL - REQUIRED (automatic zero)"
                     total = 1
                     total_tests = 1
                     break
             else:
                 dependencies_satisifed = True
-                for dependency in rubric[name]['depends']:
+                for dependency in rubric[name]["depends"]:
                     if not test_result[dependency]:
                         dependencies_satisifed = False
 
                 if result and dependencies_satisifed:
-                    report['score'] += rubric[name]['weight']
-                    report['tests_passed'] += 1
-                    report['notes'][name] = (
-                        f'PASS'
-                    )
+                    report["score"] += rubric[name]["weight"]
+                    report["tests_passed"] += 1
+                    report["notes"][name] = f"PASS"
                 else:
-                    report['notes'][name] = (
-                        f'FAIL'
-                    )
-                total += rubric[name]['weight']
+                    report["notes"][name] = f"FAIL"
+                total += rubric[name]["weight"]
                 total_tests += 1
 
-    report['score'] = int(np.ceil(100 * report['score'] / total))
+    report["score"] = int(np.ceil(100 * report["score"] / total))
     print(
         f"\n======================\n"
         f"Output of autograder\n"
@@ -170,7 +166,7 @@ def grade_assignment(request):
         f"Overall score:\t{report['score']}/{100}"
     )
     print("======================")
-    for i, note in report['notes'].items():
-        print(f'{note} {i}')
+    for i, note in report["notes"].items():
+        print(f"{note} {i}")
     print("======================")
-    save_json(report, 'tests/report.json')
+    save_json(report, "tests/report.json")

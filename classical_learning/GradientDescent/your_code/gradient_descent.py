@@ -1,7 +1,6 @@
-import numpy as np
-from your_code import HingeLoss, SquaredLoss
-from your_code import L1Regularization, L2Regularization
 import matplotlib.pyplot as plt
+import numpy as np
+from your_code import HingeLoss, L1Regularization, L2Regularization, SquaredLoss
 
 
 class GradientDescent:
@@ -27,28 +26,27 @@ class GradientDescent:
         reg_param - (float) The hyperparameter that controls the amount of
             regularization to perform. Must be non-negative.
     """
-    def __init__(self, loss, regularization=None,
-                 learning_rate=0.01, reg_param=0.05):
+
+    def __init__(self, loss, regularization=None, learning_rate=0.01, reg_param=0.05):
         self.learning_rate = learning_rate
 
         # Select regularizer
-        if regularization == 'l1':
-            regularizer = L1Regularization(reg_param)      #?
-        elif regularization == 'l2':
+        if regularization == "l1":
+            regularizer = L1Regularization(reg_param)  # ?
+        elif regularization == "l2":
             regularizer = L2Regularization(reg_param)
         elif regularization is None:
             regularizer = None
         else:
-            raise ValueError(
-                'Regularizer {} is not defined'.format(regularization))
+            raise ValueError("Regularizer {} is not defined".format(regularization))
 
         # Select loss function
-        if loss == 'hinge':
+        if loss == "hinge":
             self.loss = HingeLoss(regularizer)
-        elif loss == 'squared':
+        elif loss == "squared":
             self.loss = SquaredLoss(regularizer)
         else:
-            raise ValueError('Loss function {} is not defined'.format(loss))
+            raise ValueError("Loss function {} is not defined".format(loss))
 
         self.model = None
 
@@ -83,10 +81,10 @@ class GradientDescent:
         """
         N = features.shape[0]
         d = features.shape[1]
-        X = np.hstack((features,  np.ones((N ,1))  ))     #[x1,x2... 1]
+        X = np.hstack((features, np.ones((N, 1))))  # [x1,x2... 1]
 
         # np.random.seed
-        w = np.random.uniform(-0.1, 0.1, d+1)
+        w = np.random.uniform(-0.1, 0.1, d + 1)
         iter = 0
         prev_loss = 100000
 
@@ -94,33 +92,37 @@ class GradientDescent:
 
         if not batch_size:
             batch_size = N
-        while iter<max_iter:
+        while iter < max_iter:
             feature_indices = np.arange(batch_size)
             np.random.shuffle(feature_indices)
             # if batch_size==None:
             # feature_indices = np.random.choice(N, N, replace=False)
 
-            selected_features = X[ feature_indices[:], :]
+            selected_features = X[feature_indices[:], :]
 
             w_copy = np.copy(w)
-            loss = self.loss.forward(X = selected_features, w=w_copy, y=targets[feature_indices[:]])
+            loss = self.loss.forward(
+                X=selected_features, w=w_copy, y=targets[feature_indices[:]]
+            )
 
             # import pdb; pdb.set_trace()
             # print("loss: ", loss)
 
             # if abs(loss ) < 1e-4:       #TODO: low loss?
-            if abs(loss - prev_loss) < 1e-4:        #TODO: changed convergence
+            if abs(loss - prev_loss) < 1e-4:  # TODO: changed convergence
                 # print("exiting loop, prev loss: ", prev_loss)
-                print ("iter: ", iter)
+                print("iter: ", iter)
                 break
             else:
-                w= w- self.learning_rate * self.loss.backward(X= selected_features, w=w_copy, y=targets[feature_indices[:]])      #?
-                iter+=1
+                w = w - self.learning_rate * self.loss.backward(
+                    X=selected_features, w=w_copy, y=targets[feature_indices[:]]
+                )  # ?
+                iter += 1
                 prev_loss = loss
 
         self.model = w
 
-        #test
+        # test
         return iter
 
     def predict(self, features):
@@ -142,7 +144,7 @@ class GradientDescent:
         """
         N = features.shape[0]
         d = features.shape[1]
-        X = np.hstack(( features, np.ones((N ,1)) ))        #[x1,x2... 1]
+        X = np.hstack((features, np.ones((N, 1))))  # [x1,x2... 1]
         # print ("X: ", X)
         # print ("raw output: ", self.model.dot(X.T))
 
@@ -165,6 +167,6 @@ class GradientDescent:
 
         N = features.shape[0]
         d = features.shape[1]
-        X = np.hstack(( features, np.ones((N ,1)) ))        #[x1,x2... 1]
+        X = np.hstack((features, np.ones((N, 1))))  # [x1,x2... 1]
 
         return self.model.dot(X.T)

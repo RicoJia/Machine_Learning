@@ -1,4 +1,4 @@
-'''
+"""
 This module only contains the function that should be executed in parallel.
 Since we want to run multiple cross validation experiments with our classifier
 in parallel you will simply need to use the sklearn implementation for
@@ -9,13 +9,13 @@ https://scikit-learn.org/stable/modules/classes.html#module-sklearn.model_select
 
 Your implementation should return the mean score and standard deviation score for your cross validation
 experiment and the associated parameters for the estimator
-'''
+"""
 
 from sklearn.model_selection import cross_val_score
 
 
-def run_experiment(estimator, params, input_data, target_data) :
-    '''
+def run_experiment(estimator, params, input_data, target_data):
+    """
     This function is supposed to run a cross validation experiment with the given estimator
     and the given input and target dataset.
 
@@ -31,15 +31,15 @@ def run_experiment(estimator, params, input_data, target_data) :
     :return: Should return the mean accuracy and standarddeviation of your accuracy of your estimator
         on the cross validation experiment and the associated parameters. The parameters are already
         given in the function call. You should return a tuple of (params, mean_score, std_score)
-    '''
+    """
     scores = cross_val_score(estimator, input_data, target_data, cv=20)
-    mean =scores.mean()
+    mean = scores.mean()
     std = scores.std()
     num = input_data.shape[0]
     # return (params, mean, std, num)
 
-    #test
+    # test
     return (params, scores.tolist())
 
 
-#def func(**kwargs) then you can pass in *(3,4,5) as a tuple, or **{"level": 3 , "blah": 3} as a dictionary
+# def func(**kwargs) then you can pass in *(3,4,5) as a tuple, or **{"level": 3 , "blah": 3} as a dictionary
