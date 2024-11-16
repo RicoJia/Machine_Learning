@@ -11,14 +11,14 @@ def test_voc():
     for i in range(15):
         image, label = dataset[i]
         img = torch.Tensor(image)
-        visualize_image_target_mask(img, target=None, labels=label)
+        # visualize_image_target_mask(img, target=None, labels=label)
 
-# def test_gta5():
-#     dataset = GTA5Dataset()
-#     for i in range(15):
-#         image, label = dataset[i]
-#         img = torch.Tensor(image)
-#         visualize_image_target_mask(img, target=None, labels=label)
+def test_gta5():
+    dataset = GTA5Dataset()
+    for i in range(15):
+        image, label = dataset[i]
+        img = torch.Tensor(image)
+        # visualize_image_target_mask(img, target=None, labels=label)
 
 def test_coco():
     dataset = COCODataset(split="val", task_mode=TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION)
@@ -26,5 +26,5 @@ def test_coco():
         image, target = dataset[i]
         img = torch.Tensor(image)
         print(image.shape, target.shape)
-        visualize_image_target_mask(img, target=None, labels=None)
+        # visualize_image_target_mask(img, target=None, labels=None)
 

@@ -94,8 +94,8 @@ CLASSIFICATION_AUGMENTATION_TRANSFORMS = A.Compose(
         A.HorizontalFlip(p=0.5),
         A.RandomCrop(width=256, height=256),
         A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
-        # # Comment this out if the dataset is NOT "natural" objects
         # A.Lambda(image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
+        # Comment this out if the dataset is NOT "natural" objects
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         # Converts to [C, H, W] after all augmentations
         At.ToTensorV2(transpose_mask=False),
@@ -360,8 +360,6 @@ class VOCSegmentationDataset(Dataset):
 def download_and_unzip(url, path, dataset_dir, msg):
     os.makedirs(dataset_dir, exist_ok=True)
     if not os.path.exists(path):
-        #TODO Remember to remove
-        print(f'Rico: {path, os.path.exists(path)}')
         logging.warning(msg)
         subprocess.run(["wget", url, "-O", path+".zip"], check=True)
         subprocess.run(["unzip", path+".zip", "-d", dataset_dir], check=True)
@@ -491,6 +489,8 @@ def split_dataset(
 
 def get_data_loader(train_dataset, val_dataset, test_dataset, batch_size):
     def data_loader(dataset, shuffle: bool):
+        if dataset is None:
+            return None
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
