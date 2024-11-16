@@ -88,7 +88,7 @@ def visualize_image_target_mask(image, target=None, labels=None):
         plt.title("labels")
 
     # See tensor([  0,   1,  15, 255], dtype=torch.uint8)
-    plt.show()
     tiempo = int(time.time() * 1000)
 
     plt.savefig(RESULTS_DIR + str(tiempo) + ".png")
+    plt.show()

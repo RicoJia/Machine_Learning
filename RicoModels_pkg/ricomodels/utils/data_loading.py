@@ -23,6 +23,8 @@ from torchvision.transforms import CenterCrop, v2
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
+import subprocess
+from enum import Enum
 
 def replace_tensor_val(tensor, a, b):
     # albumentations could pass in extra args
@@ -41,13 +43,15 @@ def get_package_dir():
     else:
         raise FileNotFoundError("Package 'ricomodels' not found")
 
+def replace_mask_values(mask, ignore_index):
+    return replace_tensor_val(mask, 255, ignore_index).astype(np.int64)
 
 DATA_DIR = os.path.join(get_package_dir(), "data")
 IGNORE_INDEX = 0
 
 np.random.seed(42)
 # transforms for mask and image
-AUGMENTATION_TRANSFORMS = A.Compose(
+SEG_AUGMENTATION_TRANSFORMS = A.Compose(
     [
         A.Resize(
             height=256,
@@ -57,8 +61,14 @@ AUGMENTATION_TRANSFORMS = A.Compose(
         ),
         A.HorizontalFlip(p=0.5),
         A.RandomCrop(width=256, height=256),
-        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.2, rotate_limit=30, p=0.5),
+        A.Affine(
+            scale=(0.8, 1.2),
+            translate_percent=(0.2, 0.2),
+            rotate=(-30, 30),
+            p=0.5
+        ),
         A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
+        # normalize will divide pixel values by 255 as well
         # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         A.ElasticTransform(p=1.0),
         A.Lambda(
@@ -67,16 +77,30 @@ AUGMENTATION_TRANSFORMS = A.Compose(
             )
         ),
         # need to convert from uint8 to float32
-        # A.Normalize(
-        #     mean=(0.485, 0.456, 0.406),
-        #     std=(0.229, 0.224, 0.225)
-        # ),
-        A.Lambda(image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
+        A.Lambda(
+            image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
         # Converts to [C, H, W] after all augmentations
         At.ToTensorV2(transpose_mask=True),
     ]
 )
 
+CLASSIFICATION_AUGMENTATION_TRANSFORMS = A.Compose(
+    [
+        A.Resize(
+            height=256,
+            width=256,
+            interpolation=cv2.INTER_LINEAR,
+        ),
+        A.HorizontalFlip(p=0.5),
+        A.RandomCrop(width=256, height=256),
+        A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.5),
+        # # Comment this out if the dataset is NOT "natural" objects
+        # A.Lambda(image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
+        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        # Converts to [C, H, W] after all augmentations
+        At.ToTensorV2(transpose_mask=False),
+    ]
+)
 
 def download_file(url, dest_path, chunk_size=1024):
     """
@@ -125,6 +149,9 @@ def extract_zip(zip_path, extract_to):
     except Exception as e:
         print(f"An error occurred while extracting {zip_path}: {e}")
 
+class TaskMode(Enum):
+    SINGLE_LABEL_IMAGE_CLASSIFICATION=1
+    MULTI_LABEL_IMAGE_CLASSIFICATION=2
 
 class BaseDataset(Dataset):
     """
@@ -157,7 +184,7 @@ class BaseDataset(Dataset):
         )  # Ensure image is in RGB
         label = np.asarray(Image.open(label_path))
 
-        augmented = AUGMENTATION_TRANSFORMS(image=image, mask=label)
+        augmented = SEG_AUGMENTATION_TRANSFORMS(image=image, mask=label)
         image = augmented["image"]
         label = augmented["mask"]
 
@@ -322,7 +349,7 @@ class VOCSegmentationDataset(Dataset):
         image = np.array(image)
         label = np.array(label)
 
-        augmented = AUGMENTATION_TRANSFORMS(image=image, mask=label)
+        augmented = SEG_AUGMENTATION_TRANSFORMS(image=image, mask=label)
         image = augmented["image"]
         label = augmented["mask"]
         return image, label
@@ -330,6 +357,15 @@ class VOCSegmentationDataset(Dataset):
     def __len__(self):
         return len(self._dataset)
 
+def download_and_unzip(url, path, dataset_dir, msg):
+    os.makedirs(dataset_dir, exist_ok=True)
+    if not os.path.exists(path):
+        #TODO Remember to remove
+        print(f'Rico: {path, os.path.exists(path)}')
+        logging.warning(msg)
+        subprocess.run(["wget", url, "-O", path+".zip"], check=True)
+        subprocess.run(["unzip", path+".zip", "-d", dataset_dir], check=True)
+        subprocess.run(["rm", "-rf", path+".zip"], check=True)
 
 class COCODataset:
     """
@@ -343,13 +379,58 @@ class COCODataset:
     """
 
     def __init__(
-        self, images_dir, annotation_json_path, manual_find_class_num=False
+        self,
+        split: str,
+        task_mode: TaskMode
     ) -> None:
-        self._images_dir = images_dir
-        self._labels_dir = annotation_json_path
-        self.coco = COCO(annotation_file=annotation_json_path)
-        self.image_ids = list(self.coco.imgs.keys())
+        SUPPORTED_SPLITS = ("train", "val")
+        if split not in SUPPORTED_SPLITS:
+            raise ValueError(f"Split '{split}' is not in {SUPPORTED_SPLITS}")
+        self.split = split
+        self.task_mode = task_mode
+        
+        train_path, val_path, annotations_path = self._download_and_unzip_coco()
+        self._load_annotations(train_path, val_path, annotations_path)
 
+    def _download_and_unzip_coco(self):
+        # Download COCO
+        dataset_dir=os.path.join(get_package_dir(), DATA_DIR)
+        train_images_url = "http://images.cocodataset.org/zips/train2017.zip" 
+        val_images_url = "http://images.cocodataset.org/zips/val2017.zip"
+        annotations_url = "http://images.cocodataset.org/annotations/annotations_trainval2017.zip" 
+        COCO_path = os.path.join(dataset_dir, "coco")
+        # These names shall NOT be changed, because they correspond to the names after unzipping
+        train_path = os.path.join(COCO_path, "train2017")
+        val_path = os.path.join(COCO_path, "val2017")
+        annotations_path = os.path.join(COCO_path, "annotations")
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_train = executor.submit(download_and_unzip, train_images_url, train_path, COCO_path, "Downloading and extracting train images")
+            future_val = executor.submit(download_and_unzip, val_images_url, val_path, COCO_path, "Downloading and extracting validation images")
+            future_annotations = executor.submit(download_and_unzip, annotations_url, annotations_path, COCO_path, "Downloading and extracting annotation")
+
+            for future in as_completed([future_train, future_val, future_annotations]): 
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Downloading encounters an exception: {e}")
+        
+        return train_path, val_path, annotations_path
+
+    def _load_annotations(self, train_path, val_path, annotations_path):
+        if self.split == 'train':
+            annotation_file = os.path.join(annotations_path, "instances_train2017.json")
+            images_path = train_path
+        else:
+            annotation_file = os.path.join(annotations_path, "instances_val2017.json")
+            images_path = val_path
+        self.coco = COCO(annotation_file)
+        self.image_ids = self.coco.getImgIds()
+        self.images_path = images_path
+        self.cat_ids = self.coco.getCatIds()
+        self.cat_ids_2_labels = {cat_id: idx for idx, cat_id in enumerate(self.cat_ids)}
+        self.num_classes = len(self.cat_ids)
+ 
     def __len__(self):
         return len(self.image_ids)
 
@@ -360,14 +441,26 @@ class COCODataset:
 
         # Load image
         img_info = self.coco.loadImgs(img_id)[0]
-        img_path = os.path.join(self._images_dir, img_info["file_name"])
-        image = Image.open(img_path).convert("RGB")
+        img_path = os.path.join(self.images_path, img_info["file_name"])
+        image = np.asarray(Image.open(img_path).convert("RGB"))
+        image = CLASSIFICATION_AUGMENTATION_TRANSFORMS(image=image)["image"]
+        
+        if self.task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
+            target = self._get_item_multi_label_image_classification(anns)
+            return image, target
+        else:
+            raise NotImplementedError(
+                f"__getitem()__ has not been implemented for task {self.task_mode} yet 🥺"
+            )
 
-        # Initialize mask
-        mask = np.zeros((img_info["width"], img_info["height"]), dtype=np.int64)
-        # TODO
-        # mask = Image.new('L', (img_info['width'], img_info['height']), 0)
-
+    def _get_item_multi_label_image_classification(self, anns) -> torch.Tensor:
+        # creating a multi-hot vector
+        target = torch.zeros(self.num_classes)
+        for ann in anns:
+            cat_id = ann['category_id']
+            label_id = self.cat_ids_2_labels[cat_id]
+            target[label_id] = 1
+        return target
 
 ##################################################################
 ## Tool Functions
@@ -450,15 +543,8 @@ def get_VOC_segmentation_datasets():
     class_num = len(train_dataset)
     return train_dataset, val_dataset, test_dataset, class_num
 
-
-if __name__ == "__main__":
-    # rm -rf results/ && python3 data_loading.py && mv /tmp/results/ .
-    # eog results/$(ls results/ | head -n1)
-    from ricomodels.utils.visualization import visualize_image_target_mask
-
-    # dataset = GTA5Dataset()
-    dataset = VOCSegmentationDataset(image_set="train", year="2012")
-    for i in range(15):
-        image, label = dataset[i]
-        img = torch.Tensor(image)
-        visualize_image_target_mask(img, target=None, labels=label)
+def get_coco_classification_datasets():
+    train_dataset = COCODataset(split="train", task_mode=TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION)
+    val_dataset = COCODataset(split="val", task_mode=TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION)
+    class_num = train_dataset.num_classes
+    return train_dataset, val_dataset, None, class_num
