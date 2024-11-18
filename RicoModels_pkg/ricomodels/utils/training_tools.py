@@ -11,7 +11,7 @@ from ricomodels.utils.visualization import (
     visualize_image_target_mask,
 )
 from tqdm import tqdm
-
+import os
 
 @functools.cache
 def check_model_image_channel_num(model_channels, img_channels):
@@ -37,6 +37,14 @@ def validate_model(model, val_loader, device, criterion):
     val_loss /= len(val_loader)
     return val_loss
 
+def load_model(model_path, model, device):
+    if os.path.exists(model_path):
+        model.load_state_dict(
+            torch.load(model_path, weights_only=False, map_location=device)
+        )
+        print("Loaded model")
+    else:
+        print("Initialized model")
 
 class EarlyStopping:
     def __init__(self, delta=1e-8, patience=5, verbose=False) -> None:
@@ -77,6 +85,8 @@ class EarlyStopping:
 def _eval_model(
     model, test_dataloader, device, class_num, visualize: bool = False, msg: str = ""
 ):
+    if test_dataloader is None:
+        return float('nan')
     torch.cuda.empty_cache()
     # Evaluation phase
     num_images = len(test_dataloader)

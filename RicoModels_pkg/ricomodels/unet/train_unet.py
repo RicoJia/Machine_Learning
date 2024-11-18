@@ -24,6 +24,7 @@ from ricomodels.utils.visualization import (
     get_total_weight_norm,
     wandb_weight_histogram_logging,
 )
+from ricomodels.utils.training_tools import load_model
 from torch import optim
 from tqdm import tqdm
 
@@ -87,7 +88,6 @@ def train_model(
                 # exits autocast before backward()
                 # create scaled gradients
                 scaler.scale(loss).backward()
-
                 # loss.backward()
                 if (i + 1) % ACCUMULATION_STEPS == 0:
                     # optimizer.step()
@@ -174,13 +174,7 @@ if __name__ == "__main__":
     model = UNet(
         class_num=class_num, intermediate_before_max_pool=INTERMEDIATE_BEFORE_MAX_POOL
     )
-    if os.path.exists(MODEL_PATH):
-        model.load_state_dict(
-            torch.load(MODEL_PATH, weights_only=False, map_location=device)
-        )
-        print("Loaded model")
-    else:
-        print("Initialized model")
+    load_model(model_path=MODEL_PATH, model=model, device=device)
 
     model.to(device)
     optimizer = optim.RMSprop(

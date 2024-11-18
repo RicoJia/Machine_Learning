@@ -70,9 +70,6 @@ class InvertedBottleneckResidualBlock(nn.Module):
 
     (hxwxk --1x1 conv--> hxwxtk --3x3 conv--> h/s x w/s x tk --linear 1x1 conv--> h/s x w/s x k' --> batch norm)
 
-    Args:
-        nn (_type_): _description_
-
     Notes about MobileNetV2:
     - Depthwise Convolution IS used in the expanded conv-batch-relu part.
     - Skip connection is element-wise addition in skip + output in ResNet and MobileNetV2.
@@ -116,16 +113,25 @@ class InvertedBottleneckResidualBlock(nn.Module):
         """
         Applying shortcut between blocks, NOT between expansions. This is from the MobileNetV2 paper.
         """
+        x_original = x
         x = nn.functional.pad(x, self.padding)
         out = self.layers(x)
-        # TODO: I thought residual is to concat, not to add?
+        
         if self.use_skip_connection:
-            return x + out
+            return x_original + out
         else:
             return out
 
 
 class MobileNetV2(nn.Module):
+    """
+    The architecture is: 
+    ConvBNReLu6 -> InvertedBottleneckResidualBlocks -> classifier
+
+    Note:
+    - The classifier does NOT have sigmoid at the end. This is trained for multi-label classification, 
+    abd the sigmoid etc. is handled in the loss.
+    """
     def __init__(
         self,
         num_classes=1000,
@@ -145,11 +151,11 @@ class MobileNetV2(nn.Module):
             [6, 160, 3, 2],
             [6, 320, 1, 1],
         ]
-
+        self.n_channels = 3
         # stride = 2 is from mobilenet v2
         layers = [
             ConvBNReLu6(
-                3, input_channel, kernel_size=3, stride=2, have_relu=True
+                self.n_channels, input_channel, kernel_size=3, stride=2, have_relu=True
             )
         ]
         dilation = 1
