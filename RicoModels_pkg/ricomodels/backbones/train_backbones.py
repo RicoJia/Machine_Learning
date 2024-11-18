@@ -185,12 +185,14 @@ if __name__ == "__main__":
         test_dataloader=None,
         device=device,
         class_num=class_num,
+        task_mode=train_dataset.task_mode,
+        class_names=train_dataset.class_names,
         visualize=True,
     )
     # , val_dataloader, test_dataloader, device, class_num, visualize: bool = False)
     wandb_logger.log(
         {
-            "Stopped at epoch": epoch,
+            # "Stopped at epoch": epoch,
             "train accuracy: ": train_acc,
             "val accuracy: ": val_acc,
             "test accuracy: ": test_acc,

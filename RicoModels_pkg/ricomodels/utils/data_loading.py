@@ -1,4 +1,12 @@
 #! /usr/bin/env python3
+
+"""
+Let's keep this file small, guys. Here are some generaly guidelines:
+- Each Dataset class should have below attributes:
+    - self.task_mode
+
+"""
+
 import importlib.util
 import logging
 import os
@@ -25,6 +33,7 @@ from tqdm import tqdm
 
 import subprocess
 from enum import Enum
+import json
 
 def replace_tensor_val(tensor, a, b):
     # albumentations could pass in extra args
@@ -152,13 +161,14 @@ def extract_zip(zip_path, extract_to):
 class TaskMode(Enum):
     SINGLE_LABEL_IMAGE_CLASSIFICATION=1
     MULTI_LABEL_IMAGE_CLASSIFICATION=2
+    IMAGE_SEGMENTATION = 3
 
 class BaseDataset(Dataset):
     """
     Load data -> applies augmentation on masks and images
     """
 
-    def __init__(self, images_dir, labels_dir, manual_find_class_num=False):
+    def __init__(self, images_dir, labels_dir, task_mode, manual_find_class_num=False):
         self._images_dir = images_dir
         self._labels_dir = labels_dir
         # call this after initializing these variables
@@ -169,6 +179,7 @@ class BaseDataset(Dataset):
         ), "Number of images and labels should be equal."
 
         self._max_class = 0 if manual_find_class_num else None
+        self.task_mode = task_mode
 
     def __len__(self):
         return len(self.images)
@@ -247,7 +258,7 @@ class GTA5Dataset(BaseDataset):
                     future.result()
                 except Exception as exc:
                     print(f"An error occurred with {url}: {exc}")
-        super().__init__(images_dir=images_dir, labels_dir=labels_dir)
+        super().__init__(images_dir=images_dir, labels_dir=labels_dir, task_mode=TaskMode.IMAGE_SEGMENTATION)
 
     def download_and_extract(self, url, dir_name, zip_name):
         dest_path = os.path.join(dir_name, zip_name)
@@ -288,7 +299,7 @@ class CarvanaDataset(BaseDataset):
             get_package_dir(), DATA_DIR, "carvana", dataset_name + "_masks"
         )
 
-        super().__init__(images_dir=images_dir, labels_dir=labels_dir)
+        super().__init__(images_dir=images_dir, labels_dir=labels_dir, task_mode=TaskMode.IMAGE_SEGMENTATION)
 
     @cached_property
     def classes(self):
@@ -314,6 +325,7 @@ class VOCSegmentationDataset(Dataset):
             ),
         )
         self._classes = set()
+        self.task_mode = TaskMode.IMAGE_SEGMENTATION
         print(f"Data {image_set} Successfully Loaded")
 
     def _is_extracted(self, dataset_dir, year):
@@ -427,8 +439,17 @@ class COCODataset:
         self.images_path = images_path
         self.cat_ids = self.coco.getCatIds()
         self.cat_ids_2_labels = {cat_id: idx for idx, cat_id in enumerate(self.cat_ids)}
+        self.labels_2_cat_ids = {idx: cat_id for idx, cat_id in enumerate(self.cat_ids)}
         self.num_classes = len(self.cat_ids)
- 
+
+        # Extract class names
+        with open(annotation_file, 'r') as file:
+            data = json.load(file)
+        categories = data['categories']
+        class_names = [category['name'] for category in categories]
+        # (Optional) Sort class names by their category IDs for consistency
+        self.class_names = sorted(class_names, key=lambda x: [cat['id'] for cat in categories if cat['name'] == x][0])
+
     def __len__(self):
         return len(self.image_ids)
 

@@ -6,12 +6,15 @@ import logging
 import numpy as np
 import torch
 from ricomodels.utils.losses import DiceLoss, dice_loss, focal_loss
+from ricomodels.utils.data_loading import TaskMode
 from ricomodels.utils.visualization import (
     get_total_weight_norm,
     visualize_image_target_mask,
+    visualize_image_class_names
 )
 from tqdm import tqdm
 import os
+from typing import List
 
 @functools.cache
 def check_model_image_channel_num(model_channels, img_channels):
@@ -83,8 +86,11 @@ class EarlyStopping:
 
 @torch.inference_mode()
 def _eval_model(
-    model, test_dataloader, device, class_num, visualize: bool = False, msg: str = ""
+    model, test_dataloader, device, class_num, task_mode: TaskMode, visualize: bool = False, msg: str = "", class_names=[]
 ):
+    """
+    class_names: optional, only required for TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION. 
+    """
     if test_dataloader is None:
         return float('nan')
     torch.cuda.empty_cache()
@@ -102,23 +108,40 @@ def _eval_model(
             labels_test = labels_test.to(device)
             with torch.autocast(device_type=device_type, dtype=torch.float16):
                 outputs_test = model(inputs_test)
-            _, predicted_test = outputs_test.max(1)
-            # Returning an int
-            local_total = labels_test.numel()
+            
+            if task_mode == TaskMode.IMAGE_SEGMENTATION:
+                _, predicted_test = outputs_test.max(1)
+                # Returning an int
+                local_total = labels_test.numel()
+                local_correct = (predicted_test == labels_test).sum()
+            elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
+                # MULTI_LABLE_THRE = 0.5, TODO: can find the best threshold as part of training.
+                # [1, 1, 0...]
+                predicted_test = torch.where(outputs_test > 0.4, 1, 0).bool()
+                # This is basically recall with true_positives 
+                local_correct = (predicted_test & labels_test.bool()).sum()
+                local_total = torch.count_nonzero(labels_test)
+            else:
+                raise RuntimeError(f"Evaluation for task mode {task_mode} has NOT been implemented yet")
+                
             # Not doing item() here because that's an implicit synchronization call
             # .cpu(), .numpy() have synchronization calls, too
-            local_correct = (predicted_test == labels_test).sum()
             total_test += local_total
             correct_test += local_correct
 
             # labels_test: (m, h, w)
             if visualize:
-                # print(f'Predicted test acc {100. * local_correct/local_total}%')
-                for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
-                    # print("pred uniq: ", torch.unique(pred), "lab uniq: ", torch.unique(lab))
-                    visualize_image_target_mask(
-                        image=img.cpu(), target=pred.cpu(), labels=lab.cpu()
-                    )
+                if task_mode == TaskMode.IMAGE_SEGMENTATION:
+                    for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
+                        # print("pred uniq: ", torch.unique(pred), "lab uniq: ", torch.unique(lab))
+                        visualize_image_target_mask(
+                            image=img.cpu(), target=pred.cpu(), labels=lab.cpu()
+                        )
+                elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
+                    debug_class_count = 0
+                    for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
+                        visualize_image_class_names(image=img.cpu(), pred_cat_ids=pred, ground_truth_cat_ids=lab, class_names=class_names)
+                    
 
             # 100 is to make the prob close to 1 after softmax
             pbar.update(1)
@@ -140,7 +163,9 @@ def eval_model(
     val_dataloader,
     test_dataloader,
     device,
-    class_num,
+    class_num: int,
+    task_mode: TaskMode,
+    class_names: List[str] = [],
     visualize: bool = False,
 ):
     logging.info("Evaluating the model ... ")
@@ -150,6 +175,8 @@ def eval_model(
         device=device,
         visualize=False,
         class_num=class_num,
+        task_mode = task_mode,
+        class_names=class_names,
         msg="Train Loader",
     )
     val_acc = _eval_model(
@@ -158,6 +185,8 @@ def eval_model(
         device=device,
         visualize=False,
         class_num=class_num,
+        task_mode = task_mode,
+        class_names=class_names,
         msg="Validate Loader",
     )
     test_acc = _eval_model(
@@ -166,6 +195,8 @@ def eval_model(
         device=device,
         visualize=visualize,
         class_num=class_num,
+        task_mode = task_mode,
+        class_names=class_names,
         msg="Test Loader",
     )
     return train_acc, val_acc, test_acc
