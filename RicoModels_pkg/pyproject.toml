@@ -14,7 +14,7 @@ wandb = "^0.18.3"
 pytest = "^8.3.3"
 albumentations = "^1.4.18"
 matplotlib="<4.0.0"
-pycocotools="^2.0.8"
+pycocotools="^2.0.7"
 
 [build-system]
 requires = ["poetry-core"]
