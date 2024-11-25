@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ricomodels"
-version = "0.2.1"
+version = "0.2.2"
 description = "This is Rico's Neural Network models"
 authors = ["Rico Jia"]
 license = "BSD-2"
@@ -13,7 +13,7 @@ tqdm = "^4.66.5"
 wandb = "^0.18.3"
 pytest = "^8.3.3"
 albumentations = "^1.4.18"
-matplotlib="^3.9.2"
+matplotlib="<4.0.0"
 pycocotools="^2.0.8"
 
 [build-system]
