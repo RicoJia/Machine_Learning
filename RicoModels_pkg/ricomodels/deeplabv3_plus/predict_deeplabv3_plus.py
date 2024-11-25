@@ -73,6 +73,9 @@ class PredictBench:
                 pbar.update(1)
         return outputs
 
+    @property
+    def class_names(self):
+        return pascal_voc_classes
 
 
 if __name__ == "__main__":
