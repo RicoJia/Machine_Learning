@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "ricomodels"
-version = "0.1.0"
+version = "0.2.1"
 description = "This is Rico's Neural Network models"
 authors = ["Rico Jia"]
 license = "BSD-2"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.8"
 torch = "^2.2.0"
 tqdm = "^4.66.5"
 wandb = "^0.18.3"
