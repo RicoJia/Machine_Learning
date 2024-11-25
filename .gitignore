@@ -25,3 +25,4 @@ token.pickle
 # Files for docker container
 .bashrc
 .inputrc
+RicoModels_pkg/dist/

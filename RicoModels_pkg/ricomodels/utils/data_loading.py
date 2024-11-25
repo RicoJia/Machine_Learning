@@ -188,9 +188,10 @@ class PredictDataset(Dataset):
         return len(self.images)
     def __getitem__(self, idx):
         image = self.images[idx]
+        original_size = image.shape[:2]  # (H, W)
         augmented = PRED_SEG_AUGMENTATION_TRANSFORMS(image=image)
         image = augmented["image"]
-        return image
+        return image, original_size
         
     
 
