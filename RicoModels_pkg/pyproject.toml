@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ricomodels"
-version = "0.2.4"
+version = "0.2.5"
 description = "This is Rico's Neural Network models"
 authors = ["Rico Jia"]
 license = "BSD-2"
