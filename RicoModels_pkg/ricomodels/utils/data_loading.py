@@ -191,10 +191,9 @@ class PredictDataset(Dataset):
         original_size = image.shape[:2]  # (H, W)
         augmented = PRED_SEG_AUGMENTATION_TRANSFORMS(image=image)
         image = augmented["image"]
+        # Returning original size so the images could be scaled back up
         return image, original_size
         
-    
-
 class BaseDataset(Dataset):
     """
     Load data -> applies augmentation on masks and images

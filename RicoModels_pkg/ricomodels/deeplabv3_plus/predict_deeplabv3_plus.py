@@ -41,6 +41,20 @@ pascal_voc_classes = [
 ]
 
 def mask(labels, input_image, class_names, classes = []):
+    """Masking out pixels belonging to classes
+
+    Args:
+        labels (torch.tensor): predicted mask (currently just 1 image)
+        input_image (torch.Tensor): currently just 1 image
+        class_names (list): sorted classes of the predictor
+        classes (list, optional): list of classes to be masked OUT
+
+    Raises:
+        ValueError: Unsupported input image dimensions
+
+    Returns:
+        masked_image
+    """
     # labels: torch.Size([480, 640]), input_image: torch.Size([1, 3, 256, 256])
     if isinstance(labels, np.ndarray):
         # This ensures the array is contiguous in memory and eliminates any negative strides. 
@@ -117,11 +131,11 @@ class PredictBench:
 
     @torch.inference_mode()
     def predict(self, images: List, masked_classes = []) -> Tuple[List, List]:
-        """_summary_
+        """Predict, and apply mask to mask out specified masked_classes 
 
         Args:
-            images (List): _description_
-            masked_classes (list, optional): _description_. Defaults to [].
+            images (List): list of images. TODO: to make batch prediction compatible if necessary
+            masked_classes (list, optional): list to be masked out
 
         Returns:
             Tuple[List, List]: (outputs, masked_outputs). masked_outputs (H, W, C) could be a list of Nones
@@ -167,8 +181,6 @@ class PredictBench:
 if __name__ == "__main__":
     from PIL import Image
     import matplotlib.pyplot as plt
-    # import cv2
-    # image = np.asarray(Image.open("/home/ricojia/Downloads/man_car.jpg").convert("RGB"))
     image = np.asarray(Image.open("/home/ricojia/Downloads/dinesh.jpg").convert("RGB"))
     bench = PredictBench(
         # aux_loss: If True, include an auxiliary classifier

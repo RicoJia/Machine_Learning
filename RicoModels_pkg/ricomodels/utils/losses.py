@@ -8,6 +8,17 @@ import logging
 MULTICLASS_CLASSIFICATION_THRE = 0.5
 
 def focal_binary_multi_class(logits, targets, gamma=2):
+    """In a multiclass classification problem, each element in the output vector 
+    is a binary-classification problem
+
+    Args:
+        logits (tensor.Torch): raw logits before sigmoid (note, NOT softmax)
+        targets (tensor.Torch): targets
+        gamma (int, optional): decay parameter
+
+    Returns:
+        focal loss
+    """
     l = logits.reshape(-1)
     t = targets.reshape(-1)
     p = torch.sigmoid(l)

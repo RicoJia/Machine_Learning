@@ -7,7 +7,7 @@ license = "BSD-2"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.10"
 torch = "^2.2.0"
 tqdm = "^4.66.5"
 wandb = "^0.18.3"
