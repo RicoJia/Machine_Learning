@@ -5,7 +5,7 @@ import logging
 
 import numpy as np
 import torch
-from ricomodels.utils.losses import DiceLoss, dice_loss, focal_loss
+from ricomodels.utils.losses import DiceLoss, dice_loss, focal_loss, F1ScoreCounter, AccuracyCounter
 from ricomodels.utils.data_loading import TaskMode
 from ricomodels.utils.visualization import (
     get_total_weight_norm,
@@ -83,10 +83,10 @@ class EarlyStopping:
 
         return self.early_stop
 
-
 @torch.inference_mode()
 def _eval_model(
-    model, test_dataloader, device, class_num, task_mode: TaskMode, visualize: bool = False, msg: str = "", class_names=[]
+    model, test_dataloader, device, class_num, task_mode: TaskMode, visualize: bool = False, msg: str = "", 
+    class_names=[], multiclass_thre=0.5
 ):
     """
     class_names: optional, only required for TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION. 
@@ -97,8 +97,12 @@ def _eval_model(
     # Evaluation phase
     num_images = len(test_dataloader)
     model.eval()
-    correct_test = 0
-    total_test = 0
+    if task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
+        performance_counter = F1ScoreCounter()
+        print("multiclass_thre: ", multiclass_thre)
+    else:
+        performance_counter = AccuracyCounter()
+
     device_type = "cuda" if torch.cuda.is_available() else "cpu"
     i = 0
     # TODO I AM ITERATING OVER TRAIN_LOADER, SO I'M MORE SURE
@@ -111,29 +115,24 @@ def _eval_model(
             
             if task_mode == TaskMode.IMAGE_SEGMENTATION:
                 _, predicted_test = outputs_test.max(1)
-                # Returning an int
-                local_total = labels_test.numel()
-                local_correct = (predicted_test == labels_test).sum()
+                performance_counter.update(
+                    epoch_correct=(predicted_test == labels_test).sum(), 
+                    epoch_total=labels_test.numel())
             elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
-                # MULTI_LABLE_THRE = 0.5, TODO: can find the best threshold as part of training.
                 # [1, 1, 0...]
-                predicted_test = torch.where(outputs_test > 0.4, 1, 0).bool()
-                # This is basically recall with true_positives 
-                local_correct = (predicted_test & labels_test.bool()).sum()
-                local_total = torch.count_nonzero(labels_test)
+                predicted_test = torch.where(outputs_test > multiclass_thre, 1, 0).bool()
+                performance_counter.update(
+                    true_positives=(predicted_test & labels_test.bool()).sum(),
+                    actual_positives=torch.count_nonzero(labels_test),
+                    pred_positives=torch.count_nonzero(predicted_test)
+                )
             else:
                 raise RuntimeError(f"Evaluation for task mode {task_mode} has NOT been implemented yet")
                 
-            # Not doing item() here because that's an implicit synchronization call
-            # .cpu(), .numpy() have synchronization calls, too
-            total_test += local_total
-            correct_test += local_correct
-
             # labels_test: (m, h, w)
             if visualize:
                 if task_mode == TaskMode.IMAGE_SEGMENTATION:
                     for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
-                        # print("pred uniq: ", torch.unique(pred), "lab uniq: ", torch.unique(lab))
                         visualize_image_target_mask(
                             image=img.cpu(), target=pred.cpu(), labels=lab.cpu()
                         )
@@ -145,16 +144,13 @@ def _eval_model(
 
             # 100 is to make the prob close to 1 after softmax
             pbar.update(1)
-            # pbar.set_postfix(**{'batch accuracy': f'{100. * local_correct/local_total}%'})
-    correct_test = correct_test.cpu().item()
-    test_acc = 100.0 * correct_test / total_test
+    
     logging.info(
         f"""{msg}
-                Total weight norm: {get_total_weight_norm(model)}
-                Accuracy: {test_acc:.2f}% 
-                """
+            Total weight norm: {get_total_weight_norm(model)}
+        """
     )
-    return test_acc
+    performance_counter.print_result()
 
 
 def eval_model(
@@ -166,10 +162,11 @@ def eval_model(
     class_num: int,
     task_mode: TaskMode,
     class_names: List[str] = [],
+    multiclass_thre=0.5,
     visualize: bool = False,
 ):
     logging.info("Evaluating the model ... ")
-    train_acc = _eval_model(
+    _eval_model(
         model=model,
         test_dataloader=train_dataloader,
         device=device,
@@ -177,9 +174,10 @@ def eval_model(
         class_num=class_num,
         task_mode = task_mode,
         class_names=class_names,
+        multiclass_thre=multiclass_thre,
         msg="Train Loader",
     )
-    val_acc = _eval_model(
+    _eval_model(
         model=model,
         test_dataloader=val_dataloader,
         device=device,
@@ -187,9 +185,10 @@ def eval_model(
         class_num=class_num,
         task_mode = task_mode,
         class_names=class_names,
+        multiclass_thre=multiclass_thre,
         msg="Validate Loader",
     )
-    test_acc = _eval_model(
+    _eval_model(
         model=model,
         test_dataloader=test_dataloader,
         device=device,
@@ -197,6 +196,31 @@ def eval_model(
         class_num=class_num,
         task_mode = task_mode,
         class_names=class_names,
+        multiclass_thre=multiclass_thre,
         msg="Test Loader",
     )
-    return train_acc, val_acc, test_acc
+
+def find_best_multi_classification_score(
+    model,
+    train_dataloader,
+    device,
+    class_num: int,
+    task_mode: TaskMode,
+    class_names: List[str] = [],
+):
+    """
+    If the multiclass classifier has not defined a decision threshold, use this.
+    """
+    best_score = 0
+    best_threshold = 0.5
+    for i in np.arange(0.1, 0.9, 0.1):
+        print(f'============')
+        f1 = _eval_model(model, train_dataloader, device, class_num, task_mode, msg = "Finding best threshold", 
+                         class_names=class_names, multiclass_thre=i)
+        if f1 > best_score:
+            best_score = f1
+            best_threshold = i
+        print(f'Thre under testing: {i}, f1 score: {f1}, current best: {best_score}, current best thre: {best_threshold}')
+    print(f'Final best: {best_score}, final thre: {best_threshold}')
+    return best_threshold
+        

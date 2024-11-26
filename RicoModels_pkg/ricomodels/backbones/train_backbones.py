@@ -11,11 +11,12 @@ from ricomodels.utils.data_loading import (
     get_package_dir,
     get_coco_classification_datasets,
 )
-from ricomodels.utils.losses import DiceLoss, FocalLoss, dice_loss
+from ricomodels.utils.losses import FocalLoss, MULTICLASS_CLASSIFICATION_THRE
 from ricomodels.utils.training_tools import (
     EarlyStopping,
     check_model_image_channel_num,
     eval_model,
+    load_model,
 )
 from ricomodels.utils.visualization import (
     TrainingTimer,
@@ -26,10 +27,10 @@ from torch import optim
 from tqdm import tqdm
 
 from ricomodels.backbones.mobilenetv2.mobilenet_v2 import MobileNetV2
-from ricomodels.utils.training_tools import load_model
+import torchsummary
 
 # Input args
-USE_AMP = False
+USE_AMP = True
 
 # Configurable contants
 BATCH_SIZE = 4
@@ -79,9 +80,9 @@ def train_model(
     NUM_EPOCHS,
     device,
 ):
-    early_stopping = EarlyStopping(delta=1e-5, patience=3)
+    early_stopping = EarlyStopping(delta=1e-3, patience=1)
     timer = TrainingTimer()
-    device_type = "cuda" if torch.cuda.is_available() else "cpu"
+    device_type = str(device)
     scaler = torch.amp.GradScaler(device = device_type, enabled=USE_AMP)
 
     for epoch in range(1, NUM_EPOCHS + 1):
@@ -142,9 +143,15 @@ def train_model(
     logging.info("Training complete")
     return epoch
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--eval", "-e", action="store_true", default=False)
+    args = parser.parse_args()
+    return args
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    args = parse_args()
     train_dataset, val_dataset, _, class_num = (
         get_coco_classification_datasets()
     )
@@ -156,29 +163,34 @@ if __name__ == "__main__":
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = FocalLoss(use_focal_binary_multi_class=True) # torch.nn.BCEWithLogitsLoss()
 
     model = MobileNetV2(num_classes= class_num, output_stride=4)
     load_model(model_path=MODEL_PATH, model=model, device=device)
     model.to(device)
+    # input size is from the dataloader. It could change
+    torchsummary.summary(model, input_size=(3, 256, 256), device=str(device))
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", patience=2
-    )  # goal: minimize BCE loss
+        optimizer, "min", patience=1
+    )  # goal: minimize focal loss
     wandb_logger = init_logging()
-    # epoch = train_model(
-    #     model=model,
-    #     train_loader=train_dataloader,
-    #     criterion=criterion,
-    #     optimizer=optimizer,
-    #     scheduler=scheduler,
-    #     NUM_EPOCHS=NUM_EPOCHS,
-    #     device=device,
-    #     num_training=len(train_dataset),
-    #     wandb_logger=wandb_logger,
-    # )
+    if not args.eval:
+        epoch = train_model(
+            model=model,
+            train_loader=train_dataloader,
+            criterion=criterion,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            NUM_EPOCHS=NUM_EPOCHS,
+            device=device,
+            num_training=len(train_dataset),
+            wandb_logger=wandb_logger,
+        )
+    train_dataset.set_effective_length_if_necessary(stop_at=10)
+    multiclass_thre = MULTICLASS_CLASSIFICATION_THRE
 
-    train_acc, val_acc, test_acc = eval_model(
+    eval_model(
         model=model,
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
@@ -187,16 +199,8 @@ if __name__ == "__main__":
         class_num=class_num,
         task_mode=train_dataset.task_mode,
         class_names=train_dataset.class_names,
+        multiclass_thre=MULTICLASS_CLASSIFICATION_THRE,
         visualize=True,
-    )
-    # , val_dataloader, test_dataloader, device, class_num, visualize: bool = False)
-    wandb_logger.log(
-        {
-            # "Stopped at epoch": epoch,
-            "train accuracy: ": train_acc,
-            "val accuracy: ": val_acc,
-            "test accuracy: ": test_acc,
-        }
     )
 
     # [optional] finish the wandb run, necessary in notebooks

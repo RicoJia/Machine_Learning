@@ -59,6 +59,22 @@ DATA_DIR = os.path.join(get_package_dir(), "data")
 IGNORE_INDEX = 0
 
 np.random.seed(42)
+
+PRED_SEG_AUGMENTATION_TRANSFORMS = A.Compose(
+    [
+        A.Resize(
+            height=256,
+            width=256,
+            interpolation=cv2.INTER_LINEAR,
+        ),
+        # need to convert from uint8 to float32
+        A.Lambda(
+            image=lambda x, **kwargs: x.astype(np.float32) / 255.0),
+        # Converts to [C, H, W] after all augmentations
+        At.ToTensorV2(),
+    ]
+)
+
 # transforms for mask and image
 SEG_AUGMENTATION_TRANSFORMS = A.Compose(
     [
@@ -162,6 +178,22 @@ class TaskMode(Enum):
     SINGLE_LABEL_IMAGE_CLASSIFICATION=1
     MULTI_LABEL_IMAGE_CLASSIFICATION=2
     IMAGE_SEGMENTATION = 3
+
+class PredictDataset(Dataset):
+    def __init__(self, images):
+        """We assume images have been in np array and in RGB format"""
+        super().__init__()
+        self.images = images
+    def __len__(self):
+        return len(self.images)
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        original_size = image.shape[:2]  # (H, W)
+        augmented = PRED_SEG_AUGMENTATION_TRANSFORMS(image=image)
+        image = augmented["image"]
+        return image, original_size
+        
+    
 
 class BaseDataset(Dataset):
     """
@@ -391,17 +423,26 @@ class COCODataset:
     def __init__(
         self,
         split: str,
-        task_mode: TaskMode
+        task_mode: TaskMode,
     ) -> None:
+        """
+        stop_at : if not -1, the length of the dataset will be set to the specified value. Defaults to -1.
+        """
         SUPPORTED_SPLITS = ("train", "val")
         if split not in SUPPORTED_SPLITS:
             raise ValueError(f"Split '{split}' is not in {SUPPORTED_SPLITS}")
         self.split = split
         self.task_mode = task_mode
-        
+        self.set_effective_length_if_necessary(-1) 
         train_path, val_path, annotations_path = self._download_and_unzip_coco()
         self._load_annotations(train_path, val_path, annotations_path)
 
+    def set_effective_length_if_necessary(self, stop_at: int):
+        """
+        This function can be called at any time of the program, to expose part of the dataset to the dataloader
+        """
+        self.stop_at = stop_at
+        
     def _download_and_unzip_coco(self):
         # Download COCO
         dataset_dir=os.path.join(get_package_dir(), DATA_DIR)
@@ -415,9 +456,12 @@ class COCODataset:
         annotations_path = os.path.join(COCO_path, "annotations")
         
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_train = executor.submit(download_and_unzip, train_images_url, train_path, COCO_path, "Downloading and extracting train images")
-            future_val = executor.submit(download_and_unzip, val_images_url, val_path, COCO_path, "Downloading and extracting validation images")
-            future_annotations = executor.submit(download_and_unzip, annotations_url, annotations_path, COCO_path, "Downloading and extracting annotation")
+            future_train = executor.submit(
+                download_and_unzip, train_images_url, train_path, COCO_path, "Downloading and extracting train images")
+            future_val = executor.submit(
+                download_and_unzip, val_images_url, val_path, COCO_path, "Downloading and extracting validation images")
+            future_annotations = executor.submit(
+                download_and_unzip, annotations_url, annotations_path, COCO_path, "Downloading and extracting annotation")
 
             for future in as_completed([future_train, future_val, future_annotations]): 
                 try:
@@ -451,7 +495,10 @@ class COCODataset:
         self.class_names = sorted(class_names, key=lambda x: [cat['id'] for cat in categories if cat['name'] == x][0])
 
     def __len__(self):
-        return len(self.image_ids)
+        if self.stop_at == -1:
+            return len(self.image_ids)
+        else:
+            return self.stop_at
 
     def __getitem__(self, idx):
         img_id = self.image_ids[idx]
