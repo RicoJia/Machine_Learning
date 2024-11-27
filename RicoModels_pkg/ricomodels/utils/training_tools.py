@@ -5,16 +5,23 @@ import logging
 
 import numpy as np
 import torch
-from ricomodels.utils.losses import DiceLoss, dice_loss, focal_loss, F1ScoreCounter, AccuracyCounter
+from ricomodels.utils.losses import (
+    DiceLoss,
+    dice_loss,
+    focal_loss,
+    F1ScoreCounter,
+    AccuracyCounter,
+)
 from ricomodels.utils.data_loading import TaskMode
 from ricomodels.utils.visualization import (
     get_total_weight_norm,
     visualize_image_target_mask,
-    visualize_image_class_names
+    visualize_image_class_names,
 )
 from tqdm import tqdm
 import os
 from typing import List
+
 
 @functools.cache
 def check_model_image_channel_num(model_channels, img_channels):
@@ -40,6 +47,7 @@ def validate_model(model, val_loader, device, criterion):
     val_loss /= len(val_loader)
     return val_loss
 
+
 def load_model(model_path, model, device):
     if os.path.exists(model_path):
         model.load_state_dict(
@@ -48,6 +56,7 @@ def load_model(model_path, model, device):
         print("Loaded model")
     else:
         print("Initialized model")
+
 
 class EarlyStopping:
     def __init__(self, delta=1e-8, patience=5, verbose=False) -> None:
@@ -83,25 +92,33 @@ class EarlyStopping:
 
         return self.early_stop
 
+
 @torch.inference_mode()
 def _eval_model(
-    model, test_dataloader, device, class_num, task_mode: TaskMode, visualize: bool = False, msg: str = "", 
-    class_names=[], multiclass_thre=0.5
+    model,
+    test_dataloader,
+    device,
+    class_num,
+    task_mode: TaskMode,
+    visualize: bool = False,
+    msg: str = "",
+    class_names=[],
+    multiclass_thre=0.5,
 ):
     """
-    class_names: optional, only required for TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION. 
+    class_names: optional, only required for TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION.
     """
     if test_dataloader is None:
-        return float('nan')
+        return float("nan")
     torch.cuda.empty_cache()
     # Evaluation phase
     num_images = len(test_dataloader)
     model.eval()
     if task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
-        performance_counter = F1ScoreCounter()
+        performance_counter = F1ScoreCounter(device=device)
         print("multiclass_thre: ", multiclass_thre)
     else:
-        performance_counter = AccuracyCounter()
+        performance_counter = AccuracyCounter(device=device)
 
     device_type = "cuda" if torch.cuda.is_available() else "cpu"
     i = 0
@@ -112,23 +129,26 @@ def _eval_model(
             labels_test = labels_test.to(device)
             with torch.autocast(device_type=device_type, dtype=torch.float16):
                 outputs_test = model(inputs_test)
-            
+
             if task_mode == TaskMode.IMAGE_SEGMENTATION:
                 _, predicted_test = outputs_test.max(1)
                 performance_counter.update(
-                    epoch_correct=(predicted_test == labels_test).sum(), 
-                    epoch_total=labels_test.numel())
+                    epoch_correct=(predicted_test == labels_test).sum(),
+                    epoch_total=labels_test.numel(),
+                )
             elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
                 # [1, 1, 0...]
-                predicted_test = torch.where(outputs_test > multiclass_thre, 1, 0).bool()
+                predicted_test = (outputs_test > multiclass_thre).bool()
                 performance_counter.update(
                     true_positives=(predicted_test & labels_test.bool()).sum(),
                     actual_positives=torch.count_nonzero(labels_test),
-                    pred_positives=torch.count_nonzero(predicted_test)
+                    pred_positives=torch.count_nonzero(predicted_test),
                 )
             else:
-                raise RuntimeError(f"Evaluation for task mode {task_mode} has NOT been implemented yet")
-                
+                raise RuntimeError(
+                    f"Evaluation for task mode {task_mode} has NOT been implemented yet"
+                )
+
             # labels_test: (m, h, w)
             if visualize:
                 if task_mode == TaskMode.IMAGE_SEGMENTATION:
@@ -137,14 +157,17 @@ def _eval_model(
                             image=img.cpu(), target=pred.cpu(), labels=lab.cpu()
                         )
                 elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
-                    debug_class_count = 0
                     for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
-                        visualize_image_class_names(image=img.cpu(), pred_cat_ids=pred, ground_truth_cat_ids=lab, class_names=class_names)
-                    
+                        visualize_image_class_names(
+                            image=img.cpu(),
+                            pred_cat_ids=pred,
+                            ground_truth_cat_ids=lab,
+                            class_names=class_names,
+                        )
 
             # 100 is to make the prob close to 1 after softmax
             pbar.update(1)
-    
+
     logging.info(
         f"""{msg}
             Total weight norm: {get_total_weight_norm(model)}
@@ -172,7 +195,7 @@ def eval_model(
         device=device,
         visualize=False,
         class_num=class_num,
-        task_mode = task_mode,
+        task_mode=task_mode,
         class_names=class_names,
         multiclass_thre=multiclass_thre,
         msg="Train Loader",
@@ -181,9 +204,9 @@ def eval_model(
         model=model,
         test_dataloader=val_dataloader,
         device=device,
-        visualize=False,
+        visualize=visualize,
         class_num=class_num,
-        task_mode = task_mode,
+        task_mode=task_mode,
         class_names=class_names,
         multiclass_thre=multiclass_thre,
         msg="Validate Loader",
@@ -194,11 +217,12 @@ def eval_model(
         device=device,
         visualize=visualize,
         class_num=class_num,
-        task_mode = task_mode,
+        task_mode=task_mode,
         class_names=class_names,
         multiclass_thre=multiclass_thre,
         msg="Test Loader",
     )
+
 
 def find_best_multi_classification_score(
     model,
@@ -214,13 +238,22 @@ def find_best_multi_classification_score(
     best_score = 0
     best_threshold = 0.5
     for i in np.arange(0.1, 0.9, 0.1):
-        print(f'============')
-        f1 = _eval_model(model, train_dataloader, device, class_num, task_mode, msg = "Finding best threshold", 
-                         class_names=class_names, multiclass_thre=i)
+        print(f"============")
+        f1 = _eval_model(
+            model,
+            train_dataloader,
+            device,
+            class_num,
+            task_mode,
+            msg="Finding best threshold",
+            class_names=class_names,
+            multiclass_thre=i,
+        )
         if f1 > best_score:
             best_score = f1
             best_threshold = i
-        print(f'Thre under testing: {i}, f1 score: {f1}, current best: {best_score}, current best thre: {best_threshold}')
-    print(f'Final best: {best_score}, final thre: {best_threshold}')
+        print(
+            f"Thre under testing: {i}, f1 score: {f1}, current best: {best_score}, current best thre: {best_threshold}"
+        )
+    print(f"Final best: {best_score}, final thre: {best_threshold}")
     return best_threshold
-        

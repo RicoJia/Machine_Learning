@@ -42,8 +42,11 @@ SAVE_EVERY_N_EPOCH = 2
 WEIGHT_DECAY = 1e-8
 MOMENTUM = 0.999
 
+
 def init_logging():
-    wandb_logger = wandb.init(project="Rico-mobilenetv2", resume="allow", anonymous="must")
+    wandb_logger = wandb.init(
+        project="Rico-mobilenetv2", resume="allow", anonymous="must"
+    )
     wandb_logger.config.update(
         dict(
             epochs=NUM_EPOCHS,
@@ -69,6 +72,7 @@ def init_logging():
     )
     return wandb_logger
 
+
 def train_model(
     model,
     train_loader,
@@ -83,7 +87,7 @@ def train_model(
     early_stopping = EarlyStopping(delta=1e-3, patience=1)
     timer = TrainingTimer()
     device_type = str(device)
-    scaler = torch.amp.GradScaler(device = device_type, enabled=USE_AMP)
+    scaler = torch.amp.GradScaler(device=device_type, enabled=USE_AMP)
 
     for epoch in range(1, NUM_EPOCHS + 1):
         model.train()
@@ -143,18 +147,18 @@ def train_model(
     logging.info("Training complete")
     return epoch
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", "-e", action="store_true", default=False)
     args = parser.parse_args()
     return args
 
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args()
-    train_dataset, val_dataset, _, class_num = (
-        get_coco_classification_datasets()
-    )
+    train_dataset, val_dataset, _, class_num = get_coco_classification_datasets()
     train_dataloader, val_dataloader, _ = get_data_loader(
         train_dataset, val_dataset, None, batch_size=BATCH_SIZE
     )
@@ -163,9 +167,11 @@ if __name__ == "__main__":
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    criterion = FocalLoss(use_focal_binary_multi_class=True) # torch.nn.BCEWithLogitsLoss()
+    criterion = FocalLoss(
+        use_focal_binary_multi_class=True
+    )  # torch.nn.BCEWithLogitsLoss()
 
-    model = MobileNetV2(num_classes= class_num, output_stride=4)
+    model = MobileNetV2(num_classes=class_num, output_stride=4)
     load_model(model_path=MODEL_PATH, model=model, device=device)
     model.to(device)
     # input size is from the dataloader. It could change
@@ -187,7 +193,7 @@ if __name__ == "__main__":
             num_training=len(train_dataset),
             wandb_logger=wandb_logger,
         )
-    train_dataset.set_effective_length_if_necessary(stop_at=10)
+    train_dataset.set_effective_length_if_necessary(stop_at=1000)
     multiclass_thre = MULTICLASS_CLASSIFICATION_THRE
 
     eval_model(
@@ -200,7 +206,7 @@ if __name__ == "__main__":
         task_mode=train_dataset.task_mode,
         class_names=train_dataset.class_names,
         multiclass_thre=MULTICLASS_CLASSIFICATION_THRE,
-        visualize=True,
+        visualize=False,
     )
 
     # [optional] finish the wandb run, necessary in notebooks

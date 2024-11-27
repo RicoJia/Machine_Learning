@@ -7,8 +7,9 @@ import logging
 
 MULTICLASS_CLASSIFICATION_THRE = 0.5
 
+
 def focal_binary_multi_class(logits, targets, gamma=2):
-    """In a multiclass classification problem, each element in the output vector 
+    """In a multiclass classification problem, each element in the output vector
     is a binary-classification problem
 
     Args:
@@ -22,9 +23,9 @@ def focal_binary_multi_class(logits, targets, gamma=2):
     l = logits.reshape(-1)
     t = targets.reshape(-1)
     p = torch.sigmoid(l)
-    p = torch.where(t >= MULTICLASS_CLASSIFICATION_THRE, p, 1-p)
-    logp = - torch.log(torch.clamp(p, 1e-4, 1-1e-4))
-    loss = logp*((1-p)**gamma)
+    p = torch.where(t >= MULTICLASS_CLASSIFICATION_THRE, p, 1 - p)
+    logp = -torch.log(torch.clamp(p, 1e-4, 1 - 1e-4))
+    loss = logp * ((1 - p) ** gamma)
     loss = loss.sum()
     return loss
 
@@ -37,8 +38,8 @@ def focal_loss(outputs, targets, gamma):
     probs = torch.nn.functional.softmax(outputs, dim=1)
 
     # (n, h, w)
-    # `tensor.gather(dim, indices)` here selects the values at the locations 
-    # indicated in targets. `targets` cleverly stores indices of one-hot vector 
+    # `tensor.gather(dim, indices)` here selects the values at the locations
+    # indicated in targets. `targets` cleverly stores indices of one-hot vector
     # as class labels.
     p_true_class = probs.gather(1, targets.unsqueeze(1)).squeeze(1)
     log_p_true_class = torch.log(p_true_class + 1e-8)
@@ -47,14 +48,12 @@ def focal_loss(outputs, targets, gamma):
 
 
 class FocalLoss(nn.Module):
-    def __init__(
-        self,
-        gamma=2,
-        use_focal_binary_multi_class = False
-    ):
+    def __init__(self, gamma=2, use_focal_binary_multi_class=False):
         super().__init__()
         self._gamma = gamma
-        self.loss_func = focal_binary_multi_class if use_focal_binary_multi_class else focal_loss
+        self.loss_func = (
+            focal_binary_multi_class if use_focal_binary_multi_class else focal_loss
+        )
 
     def forward(self, outputs, labels):
         return self.loss_func(outputs, labels, self._gamma)
@@ -88,20 +87,24 @@ class DiceLoss(nn.Module):
     def forward(self, outputs, labels):
         return dice_loss(outputs, labels, self._smooth)
 
+
 class AccuracyCounter:
     """General purpose accuracy counter that could do correct/total"""
-    def __init__(self):
-        self.correct = 0.0
-        self.total = 0.0
+
+    def __init__(self, device):
+        self.correct = torch.tensor(0.0, device=device)
+        self.total = torch.tensor(0.0, device=device)
+
     def update(self, epoch_correct, epoch_total):
         # Not doing item() here because that's an implicit synchronization call
         # .cpu(), .numpy() have synchronization calls, too
         self.total += epoch_total
         self.correct += epoch_correct
+
     def get_result(self):
-        self.correct = self.correct.cpu().item()
-        accuracy = 100.0 * self.correct / self.total
+        accuracy = 100.0 * self.correct.item() / self.total.item()
         return accuracy
+
     def print_result(self):
         accuracy = self.get_result()
         logging.info(
@@ -109,14 +112,21 @@ class AccuracyCounter:
             Accuracy: {accuracy}
             """
         )
-        
+
+
 class F1ScoreCounter:
-    def __init__(self):
-        self.precision_counter = AccuracyCounter()
-        self.recall_counter = AccuracyCounter()
+    def __init__(self, device):
+        self.precision_counter = AccuracyCounter(device=device)
+        self.recall_counter = AccuracyCounter(device=device)
+
     def update(self, true_positives, actual_positives, pred_positives):
-        self.recall_counter.update(epoch_correct=true_positives, epoch_total=actual_positives)
-        self.precision_counter.update(epoch_correct=true_positives, epoch_total=pred_positives)
+        self.recall_counter.update(
+            epoch_correct=true_positives, epoch_total=actual_positives
+        )
+        self.precision_counter.update(
+            epoch_correct=true_positives, epoch_total=pred_positives
+        )
+
     def get_result(self):
         recall = self.recall_counter.get_result()
         precision = self.precision_counter.get_result()
@@ -130,4 +140,3 @@ class F1ScoreCounter:
             F1 score: {f1}, precision: {precision}, recall: {recall}
             """
         )
-        
