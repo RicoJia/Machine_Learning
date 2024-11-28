@@ -3,6 +3,7 @@ from ricomodels.og_transformer.og_transformer_encoder import (
     OGPositionalEncoder,
     DotProductAttention,
     MultiHeadAttention,
+    EncoderLayer,
 )
 from ricomodels.utils.predict_tools import allclose_replace_nan
 import pytest
@@ -22,6 +23,9 @@ def basic_config():
     }
 
 
+##################################################################################################
+
+
 def test_og_positional_encoder(basic_config):
     batch_size = basic_config["batch_size"]
     sentence_length = basic_config["sentence_length"]
@@ -38,7 +42,6 @@ def test_og_positional_encoder(basic_config):
         sentence_length,
         embedding_size,
     ), f"Output shape mismatch: {output.shape} != {(batch_size, sentence_length, embedding_size)}"
-    print("Test passed!")
 
     computed_embedding = encoder.positional_embedding.squeeze(0)
     pos = torch.arange(0, max_sentence_length).unsqueeze(1)  # [max_sentence_length, 1]
@@ -122,7 +125,7 @@ def test_scaled_dot_product_comparative_analysis():
     ).bool()  # [batch_size, num_keys], True means to mask out
 
     # Create mask: [batch_size, num_queries, num_keys], broadcasted from key_padding_mask
-    lookahead_mask = torch.randint(0, 2, (num_queries, num_keys)).bool()
+    attn_mask = torch.randint(0, 2, (num_queries, num_keys)).bool()
     attention = DotProductAttention()
 
     # Initialize PyTorch's MultiheadAttention
@@ -156,18 +159,15 @@ def test_scaled_dot_product_comparative_analysis():
         q_mha,
         k_mha,
         v_mha,
-        attn_mask=lookahead_mask.clone(),
+        attn_mask=attn_mask.clone(),
         key_padding_mask=key_padding_mask,
     )
     output_mha = output_mha.transpose(0, 1)  # [batch_size, num_queries, v_dim]
     output_custom = attention(
-        q, k, v, attn_mask=lookahead_mask, key_padding_mask=key_padding_mask
+        q, k, v, attn_mask=attn_mask, key_padding_mask=key_padding_mask
     )
     # output_custom  = attention(q, k, v, attn_mask = mask)
     atol = 1e-4
-    # TODO Remember to remove
-    print(f"{output_custom}")
-    print(f"{output_mha}")
     output_custom, output_mha = allclose_replace_nan(
         output_custom, output_mha, rtol=1e-05, atol=1e-08, sentinel=0.0
     )
@@ -245,7 +245,7 @@ def test_multi_head_attention():
     num_keys = 5
     qk_dim = 8
     v_dim = 8  # Set v_dim equal to qk_dim for comparison
-    num_heads = 2 
+    num_heads = 2
 
     # Initialize random tensors
     q = torch.randn(batch_size, num_queries, qk_dim)
@@ -259,13 +259,13 @@ def test_multi_head_attention():
         0, 2, (batch_size, num_keys)
     ).bool()  # [batch_size, num_keys], True means to mask out
     # Create mask: [batch_size, num_queries, num_keys], broadcasted from key_padding_mask
-    lookahead_mask = torch.randint(0, 2, (num_queries, num_keys)).bool()
+    attn_mask = torch.randint(0, 2, (num_queries, num_keys)).bool()
     attention = MultiHeadAttention(
         embed_dim=qk_dim,
         num_heads=num_heads,
     )
     output_custom = attention(
-        q_mha, k_mha, v_mha, attn_mask=lookahead_mask, key_padding_mask=key_padding_mask
+        q_mha, k_mha, v_mha, attn_mask=attn_mask, key_padding_mask=key_padding_mask
     )
     attention.eval()  # Disable dropout for testing
     mha = torch.nn.MultiheadAttention(
@@ -287,7 +287,7 @@ def test_multi_head_attention():
         q_mha,
         k_mha,
         v_mha,
-        attn_mask=lookahead_mask,
+        attn_mask=attn_mask,
         key_padding_mask=key_padding_mask,
     )
     atol = 1e-4
@@ -297,3 +297,130 @@ def test_multi_head_attention():
     assert torch.allclose(
         output_custom, output_mha, atol=atol
     ), f"Comparative analysis failed: Outputs do not match. output_custom shape: {output_custom.shape}, output_mha shape: {output_mha.shape}"
+
+
+##################################################################################################
+BATCH_SIZE = 16
+NUM_KEYS = 4
+NUM_QUERIES = 4
+EMBEDDING_DIM = 16
+NUM_HEADS = 8
+DROPOUT_RATE = 0.1
+
+
+@pytest.fixture
+def key_padding_mask():
+    mask = torch.zeros(BATCH_SIZE, NUM_KEYS).bool()
+    # TODO: mask[:, -1:] = True seems to be causing NaNs?
+    # mask[:, -1:] = True  # Mask the last key for all batches
+    # Not using torch.randint() because certain values could cause NaN
+
+
+@pytest.fixture
+def attn_mask():
+    return torch.randint(0, 2, (NUM_QUERIES, NUM_KEYS)).bool()
+
+
+@pytest.fixture
+def encoder_layer():
+    """Fixture to create an EncoderLayer instance."""
+    return EncoderLayer(
+        embedding_dim=EMBEDDING_DIM, num_heads=NUM_HEADS, dropout_rate=DROPOUT_RATE
+    )
+
+
+@pytest.fixture
+def input_tensor():
+    """Fixture to create a random input tensor."""
+    return torch.randn(NUM_QUERIES, BATCH_SIZE, EMBEDDING_DIM, requires_grad=True)
+
+
+def test_output_shape(encoder_layer, input_tensor, attn_mask, key_padding_mask):
+    """Test if the output shape matches the input shape."""
+    output = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+    assert (
+        output.shape == input_tensor.shape
+    ), f"Expected output shape {input_tensor.shape}, got {output.shape}"
+
+
+def test_gradient_flow_no_mask(encoder_layer, input_tensor):
+    """Predecessor test of test_gradient_flow"""
+    output = encoder_layer(input_tensor, attn_mask=None, key_padding_mask=None)
+    loss = output.sum()
+    loss.backward()
+    assert input_tensor.grad is not None, "Gradients did not flow back to the input."
+    # TODO Remember to remove
+    print(f"input_tensor.grad.abs().sum(): {input_tensor.grad.abs().sum()}")
+    assert input_tensor.grad.abs().sum() > 0, "Gradients are zero."
+
+
+def test_gradient_flow(encoder_layer, input_tensor, attn_mask, key_padding_mask):
+    """Smart test by checking if there's non-zero gradient after backward pass"""
+    output = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+    loss = output.sum()
+    loss.backward()
+    assert input_tensor.grad is not None, "Gradients did not flow back to the input."
+    # TODO Remember to remove
+    print(f"input_tensor.grad.abs().sum(): {input_tensor.grad.abs().sum()}")
+    assert input_tensor.grad.abs().sum() > 0, "Gradients are zero."
+
+
+def test_dropout_active_in_train(
+    encoder_layer, input_tensor, attn_mask, key_padding_mask
+):
+    """Very smart test by having letting the encoder layer go thru the same inputs"""
+    encoder_layer.train()
+    output1 = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+    output2 = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+    # Since dropout is stochastic, outputs should differ
+    assert not torch.allclose(
+        output1, output2
+    ), "Dropout did not introduce randomness during training."
+
+
+def test_residual_connections(encoder_layer, input_tensor, attn_mask, key_padding_mask):
+    """Test that residual connections are properly adding the input to the sublayer outputs."""
+    encoder_layer.eval()
+    with torch.no_grad():
+        output = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+        # Since residual connections are present, output should differ from sublayer outputs
+        # Compare output to input to ensure residuals have been added
+        difference = torch.abs(output - input_tensor).mean()
+        assert (
+            difference > 0
+        ), "Residual connections might not be functioning correctly."
+
+
+def test_mask_handling(encoder_layer, input_tensor, attn_mask, key_padding_mask):
+    """Test that applying masks affects the output as expected."""
+    # Without masks
+    output_no_mask = encoder_layer(input_tensor, attn_mask=None, key_padding_mask=None)
+    output_with_mask = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+    # The outputs should differ when masks are applied
+    assert not torch.allclose(
+        output_no_mask, output_with_mask
+    ), "Masking does not affect the output as expected."
+
+
+@pytest.mark.parametrize(
+    "embedding_dim,num_heads,dropout_rate",
+    [
+        (32, 4, 0.1),
+        (64, 8, 0.2),
+        (128, 16, 0.3),
+    ],
+)
+def test_parameter_variations(
+    embedding_dim, num_heads, dropout_rate, attn_mask, key_padding_mask
+):
+    """Test EncoderLayer with different embedding dimensions, number of heads, and dropout rates."""
+    input_tensor = torch.randn(
+        NUM_QUERIES, BATCH_SIZE, embedding_dim, requires_grad=True
+    )
+    encoder_layer = EncoderLayer(
+        embedding_dim=embedding_dim, num_heads=num_heads, dropout_rate=dropout_rate
+    )
+    output = encoder_layer(input_tensor, attn_mask, key_padding_mask)
+    assert (
+        output.shape == input_tensor.shape
+    ), f"Mismatch in output shape for embedding_dim={embedding_dim}, num_heads={num_heads}, dropout_rate={dropout_rate}"

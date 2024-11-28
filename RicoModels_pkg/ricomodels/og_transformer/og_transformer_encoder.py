@@ -55,8 +55,8 @@ class DotProductAttention(torch.nn.Module):
         """
         Args:
             q (torch.Tensor): [batch_size, query_num, qk_dim] or [batch_size, head_num, query_num, qk_dim]
-            k (torch.Tensor): [batch_size, kv_num, qk_dim] or [batch_size, head_num, query_num, qk_dim]
-            v (torch.Tensor): [batch_size, kv_num, v_dim] or [batch_size, head_num, query_num, qk_dim]
+            k (torch.Tensor): [batch_size, kv_num, qk_dim] or [batch_size, head_num, kv_num, qk_dim]
+            v (torch.Tensor): [batch_size, kv_num, v_dim] or [batch_size, head_num, kv_num, qk_dim]
             attn_mask (torch.Tensor): or look-ahead mask, [query_num, kv_num]. 1 means "mask out"
                 Later, they are multiplied by large negative values -1e9. so values can be ignored in softmax.
             key_padding_mask (torch.Tensor): [batch_size, kv_num]. 1 means "mask out"
@@ -67,6 +67,8 @@ class DotProductAttention(torch.nn.Module):
             torch.tensor(k.shape[-1], dtype=torch.float32)
         )
         if attn_mask is not None:
+            if attn_mask.ndim == 2:
+                attn_mask = attn_mask.unsqueeze(0)
             q_kT_scaled.masked_fill_(attn_mask.bool(), float("-inf"))
         if key_padding_mask is not None:
             key_padding_mask = key_padding_mask.unsqueeze(1)
@@ -152,6 +154,49 @@ class PositionwiseFFN(torch.nn.Module):
     def forward(self, X):
         # (batch size, number of time steps, output_dim).
         return self.dense2(self.relu(self.dense1(X)))
+
+
+class EncoderLayer(torch.nn.Module):
+    def __init__(
+        self,
+        embedding_dim,
+        num_heads,
+        dropout_rate=0.1,
+    ) -> None:
+        super().__init__()
+        # need dropout. The torch implementation already has it
+        self.mha = MultiHeadAttention(
+            embed_dim=embedding_dim,
+            num_heads=num_heads,
+        )
+        self.dropout1 = torch.nn.Dropout(p=dropout_rate)
+        self.ffn = PositionwiseFFN(hidden_dim=embedding_dim, output_dim=embedding_dim)
+        self.layernorm1 = torch.nn.LayerNorm(normalized_shape=embedding_dim)
+        self.layernorm2 = torch.nn.LayerNorm(normalized_shape=embedding_dim)
+        self.dropout2 = torch.nn.Dropout(p=dropout_rate)
+
+    def forward(self, X, attn_mask, key_padding_mask):
+        # Self attention (batch_size, input_seq_len, embedding_dim)
+        self_attn_output = self.mha(
+            X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask
+        )
+        # apply dropout layer to the self-attention output (~1 line)
+        self_attn_output = self.dropout1(
+            self_attn_output,
+        )
+        # Applying Skip Connection
+        mult_attn_out = self.layernorm1(
+            X + self_attn_output
+        )  # (batch_size, input_seq_len, embedding_dim)
+        ffn_output = self.ffn(
+            mult_attn_out
+        )  # (batch_size, input_seq_len, embedding_dim)
+        ffn_output = self.dropout2(ffn_output)
+        # Applying Skip Connection
+        encoder_layer_out = self.layernorm2(
+            ffn_output + mult_attn_out
+        )  # (batch_size, input_seq_len, embedding_dim)
+        return encoder_layer_out
 
 
 def _plot_positional_encoder(
