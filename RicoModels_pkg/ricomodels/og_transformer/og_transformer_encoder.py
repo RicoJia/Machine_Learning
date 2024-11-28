@@ -32,19 +32,110 @@ def create_padding_mask(padded_token_ids):
 
 def create_look_ahead_mask(sequence_length):
     """
-    Return a lower triangle
-    tensor([[ True, False, False],
-            [ True,  True, False],
-            [ True,  True,  True]])
+    Return an upper triangle
+    tensor([[False,  True,  True],
+            [False, False,  True],
+            [False, False, False]])
     """
     # diagonal = 0 is to include the diagonal items
-    return torch.tril(torch.ones(sequence_length, sequence_length), diagonal=0).bool()
+    return (
+        1 - torch.tril(torch.ones(sequence_length, sequence_length), diagonal=0)
+    ).bool()
 
 
-# class PaddingMask(torch.nn.Module):
-#     def __init__(self, max_sentence_length):
-#         super().__init__()
-#     def forward(self, X):
+class DotProductAttention(torch.nn.Module):
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attn_mask: torch.Tensor = None,
+        key_padding_mask: torch.Tensor = None,
+    ):
+        """
+        Args:
+            q (torch.Tensor): [batch_size, query_num, qk_dim] or [batch_size, head_num, query_num, qk_dim]
+            k (torch.Tensor): [batch_size, kv_num, qk_dim] or [batch_size, head_num, query_num, qk_dim]
+            v (torch.Tensor): [batch_size, kv_num, v_dim] or [batch_size, head_num, query_num, qk_dim]
+            attn_mask (torch.Tensor): or look-ahead mask, [query_num, kv_num]. 1 means "mask out"
+                Later, they are multiplied by large negative values -1e9. so values can be ignored in softmax.
+            key_padding_mask (torch.Tensor): [batch_size, kv_num]. 1 means "mask out"
+        Returns:
+            attention: [batch_size, query_num, v_dim] or [batch_size, head_num, query_num, qk_dim]
+        """
+        q_kT_scaled = (q @ k.transpose(-2, -1)) / torch.sqrt(
+            torch.tensor(k.shape[-1], dtype=torch.float32)
+        )
+        if attn_mask is not None:
+            # q_kT_scaled += attn_mask
+            q_kT_scaled.masked_fill_(attn_mask.bool(), float("-inf"))
+        if key_padding_mask is not None:
+            key_padding_mask = key_padding_mask.unsqueeze(1)
+            if q_kT_scaled.ndim == 4:
+                key_padding_mask = key_padding_mask.unsqueeze(2)
+            # [batch_size, query_num, kv_num]
+            q_kT_scaled = q_kT_scaled.masked_fill(
+                key_padding_mask,
+                float("-inf"),
+            )
+        attention_weight = torch.nn.functional.softmax(q_kT_scaled, dim=-1)
+        attention = attention_weight @ v
+        # TODO In this implementation, there's a drop out
+        # https://ricojia.github.io/2022/03/27/deep-learning-attention-mechanism/#scaled-dot-product-luong-attention
+        return attention
+
+
+class PositionwiseFFN(torch.nn.Module):
+    def __init__(self, hidden_dim, output_dim) -> None:
+        super().__init__()
+        self.dense1 = torch.nn.LazyLinear(hidden_dim)
+        self.relu = torch.nn.ReLU()
+        self.dense2 = torch.nn.LazyLinear(output_dim)
+
+    def forward(self, X):
+        # (batch size, number of time steps, output_dim).
+        return self.dense2(self.relu(self.dense1(X)))
+
+
+class MultiHeadAttention(torch.nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        """
+        1. Linearly transform q, k, v so that they all have the same hidden dimension hidden_size
+        2. Split q', k', v' into heads
+        3. Each group of q, k, v go into DotProductAttention
+        4. The concatenated head is transformed into a shorter embedding through a dense layer, Wo
+        """
+        # embed_dim is also qk_dim,
+        super().__init__()
+        assert (
+            embed_dim % num_heads == 0
+        ), f"Embed_dim: {embed_dim} must be divisible by num_heads: {num_heads}"
+        # Doing Wq, Wk, Wv. TODO: by default, v is also assumed to be of length embed_dim?
+        self.Wq = torch.nn.Linear(embed_dim, embed_dim, bias=False)
+        self.Wk = torch.nn.Linear(embed_dim, embed_dim, bias=False)
+        self.Wv = torch.nn.Linear(embed_dim, embed_dim, bias=False)
+        # self.Wo
+        self.out_proj = torch.nn.Linear(
+            embed_dim, embed_dim, bias=False
+        )  # TODO: by default, o is also of embed_dim?
+        self.attention = DotProductAttention()
+        self.num_heads = num_heads
+
+    def forward(self, q, k, v, key_padding_mask=None, attn_mask=None):
+        """
+        Args: ACHTUNG: THIS IS WEIRD because num_queries is at the front
+        q (torch.Tensor): [num_queries, batch_size, qk_dim]
+        k (torch.Tensor): [num_keys, batch_size, qk_dim]
+        v (torch.Tensor): [num_keys, batch_size, v_dim]
+        """
+        num_queries, batch_size, _ = q.size()
+        num_keys = k.size(0)
+        q_proj = self.Wq(q)  # [num_queries, batch_size, embed_dim]
+        k_proj = self.Wk(k)  # [num_keys, batch_size, embed_dim]
+        v_proj = self.Wv(v)  # [num_keys, batch_size, embed_dim]
+        # now, split them into num_heads. How to calculate heads in parallel?
+        # for _ in range(self.num_heads):
+        #     self.attention(?)
 
 
 def _plot_positional_encoder(
@@ -75,9 +166,7 @@ if __name__ == "__main__":
         ]
     )
     padding_mask = create_padding_mask(input_seq)
-    # TODO Remember to remove
     print(f"{padding_mask}")
-    # print(torch.nn.functional.softmax(input_seq + (1 - padding_mask) * -1e9))
 
     look_ahead_mask = create_look_ahead_mask(sequence_length=3)
     print(f"{look_ahead_mask}")

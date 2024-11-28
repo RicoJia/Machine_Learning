@@ -74,7 +74,7 @@ if __name__ == "__main__":
     class_names = val_dataset.class_names
     print(f"class_names: {class_names}")
     dataset = PredictDataset(
-        images_dir="/home/ricojia/Downloads/pics/tmp",
+        images_dir="/home/ricojia/Downloads/pics/test",
         transforms=CLASSIFICATION_PRED_TRANSFORMS,
     )
     dataloader = torch.utils.data.DataLoader(
