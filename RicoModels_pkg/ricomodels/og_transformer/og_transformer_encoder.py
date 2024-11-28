@@ -67,7 +67,6 @@ class DotProductAttention(torch.nn.Module):
             torch.tensor(k.shape[-1], dtype=torch.float32)
         )
         if attn_mask is not None:
-            # q_kT_scaled += attn_mask
             q_kT_scaled.masked_fill_(attn_mask.bool(), float("-inf"))
         if key_padding_mask is not None:
             key_padding_mask = key_padding_mask.unsqueeze(1)
@@ -85,18 +84,6 @@ class DotProductAttention(torch.nn.Module):
         return attention
 
 
-class PositionwiseFFN(torch.nn.Module):
-    def __init__(self, hidden_dim, output_dim) -> None:
-        super().__init__()
-        self.dense1 = torch.nn.LazyLinear(hidden_dim)
-        self.relu = torch.nn.ReLU()
-        self.dense2 = torch.nn.LazyLinear(output_dim)
-
-    def forward(self, X):
-        # (batch size, number of time steps, output_dim).
-        return self.dense2(self.relu(self.dense1(X)))
-
-
 class MultiHeadAttention(torch.nn.Module):
     def __init__(self, embed_dim, num_heads):
         """
@@ -110,7 +97,7 @@ class MultiHeadAttention(torch.nn.Module):
         assert (
             embed_dim % num_heads == 0
         ), f"Embed_dim: {embed_dim} must be divisible by num_heads: {num_heads}"
-        # Doing Wq, Wk, Wv. TODO: by default, v is also assumed to be of length embed_dim?
+        # Doing Wq, Wk, Wv. By default, v is also assumed to be of length embed_dim
         self.Wq = torch.nn.Linear(embed_dim, embed_dim, bias=False)
         self.Wk = torch.nn.Linear(embed_dim, embed_dim, bias=False)
         self.Wv = torch.nn.Linear(embed_dim, embed_dim, bias=False)
@@ -120,6 +107,8 @@ class MultiHeadAttention(torch.nn.Module):
         )  # TODO: by default, o is also of embed_dim?
         self.attention = DotProductAttention()
         self.num_heads = num_heads
+        self.head_dim = embed_dim // self.num_heads
+        self.embedding_dim = embed_dim
 
     def forward(self, q, k, v, key_padding_mask=None, attn_mask=None):
         """
@@ -134,8 +123,35 @@ class MultiHeadAttention(torch.nn.Module):
         k_proj = self.Wk(k)  # [num_keys, batch_size, embed_dim]
         v_proj = self.Wv(v)  # [num_keys, batch_size, embed_dim]
         # now, split them into num_heads. How to calculate heads in parallel?
-        # for _ in range(self.num_heads):
-        #     self.attention(?)
+        q = q_proj.view(num_queries, batch_size, self.num_heads, self.head_dim)
+        k = k_proj.view(num_keys, batch_size, self.num_heads, self.head_dim)
+        v = v_proj.view(num_keys, batch_size, self.num_heads, self.head_dim)
+
+        # [batch, head_num, num_keys/num_queries, embed_dim]
+        q = q.permute(1, 2, 0, 3)
+        k = k.permute(1, 2, 0, 3)
+        v = v.permute(1, 2, 0, 3)
+        # [batch_size, head_num, query_num, head_embed_dim]
+        attention = self.attention(
+            q=q, k=k, v=v, attn_mask=attn_mask, key_padding_mask=key_padding_mask
+        )
+        # [query_num, batch_size, head_num, head_embed_dim]
+        attention = attention.permute(2, 0, 1, 3).contiguous()  # TODO? .contiguous()
+        attention = attention.view(num_queries, batch_size, self.embedding_dim)
+        attention_output = self.out_proj(attention)
+        return attention_output
+
+
+class PositionwiseFFN(torch.nn.Module):
+    def __init__(self, hidden_dim, output_dim) -> None:
+        super().__init__()
+        self.dense1 = torch.nn.LazyLinear(hidden_dim)
+        self.relu = torch.nn.ReLU()
+        self.dense2 = torch.nn.LazyLinear(output_dim)
+
+    def forward(self, X):
+        # (batch size, number of time steps, output_dim).
+        return self.dense2(self.relu(self.dense1(X)))
 
 
 def _plot_positional_encoder(

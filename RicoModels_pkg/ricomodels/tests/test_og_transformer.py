@@ -229,18 +229,17 @@ def test_scaled_dot_product_numerical_precision():
     v = torch.tensor([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]], dtype=torch.float32)
 
     mask = torch.zeros(batch_size, num_queries, num_keys)
-
     attention = DotProductAttention()
-
     output = attention(q, k, v, attn_mask=mask)
-
     # Check for NaNs or Infs
     assert not torch.isnan(output).any(), "Output contains NaNs."
     assert not torch.isinf(output).any(), "Output contains Infs."
 
 
 def test_multi_head_attention():
-    """ """
+    """
+    Ultimate correctness check against the torch implementation with the same weight matrices
+    """
     batch_size = 2
     num_queries = 4
     num_keys = 5
@@ -258,16 +257,43 @@ def test_multi_head_attention():
     v_mha = v.transpose(0, 1)  # [num_keys, batch_size, v_dim]
     key_padding_mask = torch.randint(
         0, 2, (batch_size, num_keys)
-    ).bool()  # [batch_size, num_keys], True means masked
-
+    ).bool()  # [batch_size, num_keys], True means to mask out
     # Create mask: [batch_size, num_queries, num_keys], broadcasted from key_padding_mask
-    mask = key_padding_mask.unsqueeze(1).expand(-1, num_queries, -1).float()
+    lookahead_mask = torch.randint(0, 2, (num_queries, num_keys)).bool()
     attention = MultiHeadAttention(
         embed_dim=qk_dim,
         num_heads=num_heads,
     )
-
-    attention(q_mha, k_mha, v_mha, key_padding_mask)
-
-    # # Initialize PyTorch's MultiheadAttention
-    # mha = torch.nn.MultiheadAttention(embed_dim=qk_dim, num_heads=num_heads, bias=False, add_bias_kv=False, add_zero_attn=False)
+    output_custom = attention(
+        q_mha, k_mha, v_mha, attn_mask=lookahead_mask, key_padding_mask=key_padding_mask
+    )
+    attention.eval()  # Disable dropout for testing
+    mha = torch.nn.MultiheadAttention(
+        embed_dim=qk_dim,
+        num_heads=num_heads,
+        bias=False,
+        add_bias_kv=False,
+        add_zero_attn=False,
+    )
+    mha.eval()  # Disable dropout for testing
+    with torch.no_grad():
+        # Concatenate weights for in_proj_weight
+        in_proj_weight = torch.cat(
+            [attention.Wq.weight, attention.Wk.weight, attention.Wv.weight], dim=0
+        )
+        mha.in_proj_weight.copy_(in_proj_weight)
+        mha.out_proj.weight.copy_(attention.out_proj.weight)
+    output_mha, _ = mha(
+        q_mha,
+        k_mha,
+        v_mha,
+        attn_mask=lookahead_mask,
+        key_padding_mask=key_padding_mask,
+    )
+    atol = 1e-4
+    output_custom, output_mha = allclose_replace_nan(
+        output_custom, output_mha, rtol=1e-05, atol=1e-08, sentinel=0.0
+    )
+    assert torch.allclose(
+        output_custom, output_mha, atol=atol
+    ), f"Comparative analysis failed: Outputs do not match. output_custom shape: {output_custom.shape}, output_mha shape: {output_mha.shape}"
