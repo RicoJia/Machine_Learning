@@ -245,7 +245,7 @@ def test_multi_head_attention():
     num_keys = 5
     qk_dim = 8
     v_dim = 8  # Set v_dim equal to qk_dim for comparison
-    num_heads = 1  # Single head for simplicity
+    num_heads = 2 
 
     # Initialize random tensors
     q = torch.randn(batch_size, num_queries, qk_dim)
