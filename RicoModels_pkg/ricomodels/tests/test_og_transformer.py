@@ -310,15 +310,20 @@ DROPOUT_RATE = 0.1
 
 @pytest.fixture
 def key_padding_mask():
+    """As long as the attention_weight is longer than 2 elements,
+    we should never have a row being completely masked out"""
     mask = torch.zeros(BATCH_SIZE, NUM_KEYS).bool()
-    # TODO: mask[:, -1:] = True seems to be causing NaNs?
-    # mask[:, -1:] = True  # Mask the last key for all batches
-    # Not using torch.randint() because certain values could cause NaN
+    mask[:, -1:] = True
+    return mask
 
 
 @pytest.fixture
 def attn_mask():
-    return torch.randint(0, 2, (NUM_QUERIES, NUM_KEYS)).bool()
+    """As long as the attention_weight is longer than 2 elements,
+    we should never have a row being completely masked out"""
+    mask = torch.zeros(NUM_QUERIES, NUM_KEYS).bool()
+    mask[:, 0] = True
+    return mask
 
 
 @pytest.fixture
