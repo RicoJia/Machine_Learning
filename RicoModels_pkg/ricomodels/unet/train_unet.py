@@ -18,13 +18,13 @@ from ricomodels.utils.training_tools import (
     EarlyStopping,
     check_model_image_channel_num,
     eval_model,
+    load_model,
 )
 from ricomodels.utils.visualization import (
     TrainingTimer,
     get_total_weight_norm,
     wandb_weight_histogram_logging,
 )
-from ricomodels.utils.training_tools import load_model
 from torch import optim
 from tqdm import tqdm
 

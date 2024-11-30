@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 
-from ricomodels.utils.data_loading import (
-    get_package_dir,
-    PredictDataset,
-    PRED_SEG_AUGMENTATION_TRANSFORMS,
-)
-from ricomodels.utils.visualization import visualize_image_target_mask
-from ricomodels.utils.predict_tools import resize_prediction, mask
-from ricomodels.utils.training_tools import load_model
+from typing import List, Tuple
+
+import numpy as np
 import torch
+from ricomodels.utils.data_loading import (
+    PRED_SEG_AUGMENTATION_TRANSFORMS,
+    PredictDataset,
+    get_package_dir,
+)
+from ricomodels.utils.predict_tools import mask, resize_prediction
+from ricomodels.utils.training_tools import load_model
+from ricomodels.utils.visualization import visualize_image_target_mask
 from torch.nn import functional as F
 from torchvision import models
-from typing import List, Tuple
 from tqdm import tqdm
-import numpy as np
 
 pascal_voc_classes = [
     "background",
@@ -106,8 +107,8 @@ class PredictBench:
 
 
 if __name__ == "__main__":
-    from PIL import Image
     import matplotlib.pyplot as plt
+    from PIL import Image
 
     dataset = PredictDataset(
         images_dir="/home/ricojia/Downloads/pics",

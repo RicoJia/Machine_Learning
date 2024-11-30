@@ -35,8 +35,8 @@ def get_total_weight_norm(model):
     for _, param in model.named_parameters():
         if param.requires_grad:
             param_norm = param.norm(2)
-            total_norm += param_norm ** 2
-    return total_norm ** 0.5
+            total_norm += param_norm**2
+    return total_norm**0.5
 
 
 def setup_results_dir_once():

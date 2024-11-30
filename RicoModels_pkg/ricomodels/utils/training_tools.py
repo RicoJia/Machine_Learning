@@ -2,25 +2,25 @@
 
 import functools
 import logging
+import os
+from typing import List
 
 import numpy as np
 import torch
+from ricomodels.utils.data_loading import TaskMode
 from ricomodels.utils.losses import (
+    AccuracyCounter,
     DiceLoss,
+    F1ScoreCounter,
     dice_loss,
     focal_loss,
-    F1ScoreCounter,
-    AccuracyCounter,
 )
-from ricomodels.utils.data_loading import TaskMode
 from ricomodels.utils.visualization import (
     get_total_weight_norm,
-    visualize_image_target_mask,
     visualize_image_class_names,
+    visualize_image_target_mask,
 )
 from tqdm import tqdm
-import os
-from typing import List
 
 
 @functools.cache

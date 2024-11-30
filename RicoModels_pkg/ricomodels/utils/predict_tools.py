@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
-import torch.nn.functional as F
-import torch
 import numpy as np
+import torch
+import torch.nn.functional as F
+
+
+def allclose_replace_nan(tensor1, tensor2, rtol=1e-05, atol=1e-08, sentinel=0.0):
+    """
+    torch.allclose() does not handle nan. This is to replace nan with sentinel
+    """
+    tensor1_replaced = torch.where(
+        torch.isnan(tensor1), torch.full_like(tensor1, sentinel), tensor1
+    )
+    tensor2_replaced = torch.where(
+        torch.isnan(tensor2), torch.full_like(tensor2, sentinel), tensor2
+    )
+    return tensor1_replaced, tensor2_replaced
 
 
 def mask(labels, input_image, class_names, classes=[]):

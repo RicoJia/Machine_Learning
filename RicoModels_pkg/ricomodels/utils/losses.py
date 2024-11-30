@@ -1,9 +1,10 @@
 #!/usr/env/bin python3
 
+import logging
+
 import torch
 import torch.functional as F
 import torch.nn as nn
-import logging
 
 MULTICLASS_CLASSIFICATION_THRE = 0.5
 

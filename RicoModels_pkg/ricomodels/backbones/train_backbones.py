@@ -4,14 +4,16 @@ import logging
 import os
 
 import torch
+import torchsummary
 import wandb
+from ricomodels.backbones.mobilenetv2.mobilenet_v2 import MobileNetV2
 from ricomodels.unet.unet import UNet
 from ricomodels.utils.data_loading import (
+    get_coco_classification_datasets,
     get_data_loader,
     get_package_dir,
-    get_coco_classification_datasets,
 )
-from ricomodels.utils.losses import FocalLoss, MULTICLASS_CLASSIFICATION_THRE
+from ricomodels.utils.losses import MULTICLASS_CLASSIFICATION_THRE, FocalLoss
 from ricomodels.utils.training_tools import (
     EarlyStopping,
     check_model_image_channel_num,
@@ -25,9 +27,6 @@ from ricomodels.utils.visualization import (
 )
 from torch import optim
 from tqdm import tqdm
-
-from ricomodels.backbones.mobilenetv2.mobilenet_v2 import MobileNetV2
-import torchsummary
 
 # Input args
 USE_AMP = True

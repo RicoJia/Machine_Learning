@@ -8,10 +8,13 @@ Let's keep this file small, guys. Here are some generaly guidelines:
 """
 
 import importlib.util
+import json
 import logging
 import os
+import subprocess
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from enum import Enum
 from functools import cache, cached_property
 from typing import List, Tuple
 
@@ -30,10 +33,6 @@ from torchvision import datasets, transforms
 from torchvision.transforms import CenterCrop, v2
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
-
-import subprocess
-from enum import Enum
-import json
 
 
 def replace_tensor_val(tensor, a, b):
