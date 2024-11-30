@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import math
+
 import torch
 from matplotlib import pyplot as plt
 
@@ -197,6 +199,51 @@ class EncoderLayer(torch.nn.Module):
             ffn_output + mult_attn_out
         )  # (batch_size, input_seq_len, embedding_dim)
         return encoder_layer_out
+
+
+class Encoder(torch.nn.Module):
+    def __init__(
+        self,
+        embedding_dim,
+        input_vocab_dim,
+        encoder_layer_num,
+        num_heads,
+        max_sentence_length,
+        dropout_rate=0.1,
+    ) -> None:
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.positional_encoder = OGPositionalEncoder(
+            max_sentence_length=max_sentence_length, embedding_size=self.embedding_dim
+        )
+        self.embedding_converter = torch.nn.Embedding(
+            num_embeddings=input_vocab_dim, embedding_dim=self.embedding_dim
+        )
+        self.dropout_pre_encoder = torch.nn.Dropout(p=dropout_rate)
+        self.encoder_layers = torch.nn.ModuleList(
+            [
+                EncoderLayer(
+                    embedding_dim=self.embedding_dim,
+                    num_heads=num_heads,
+                    dropout_rate=dropout_rate,
+                )
+                for _ in range(encoder_layer_num)
+            ]
+        )
+
+    def forward(self, X, attn_mask, key_padding_mask):
+        # X: [Batch_Size, Sentence_length]
+        X = self.embedding_converter(
+            X
+        )  # X: [Batch_Size, Sentence_length, embedding_size]
+        X /= math.sqrt(float(self.embedding_dim))
+        X = self.positional_encoder(X)  # applies positional encoding in addition
+        # TODO Remember to remove
+        print(f"X.shape: {X.shape}")
+        X = self.dropout_pre_encoder(X)
+        for encoder_layer in self.encoder_layers:
+            X = encoder_layer(X, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+        return X
 
 
 def _plot_positional_encoder(

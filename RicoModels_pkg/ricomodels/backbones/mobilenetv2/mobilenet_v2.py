@@ -36,7 +36,7 @@ class ConvBNReLu6(nn.Sequential):
                 padding=0,
                 dilation=dilation,
                 groups=groups,
-                bias = False,
+                bias=False,
             ),
             nn.BatchNorm2d(out_channels),
         ]
@@ -116,7 +116,7 @@ class InvertedBottleneckResidualBlock(nn.Module):
         x_original = x
         x = nn.functional.pad(x, self.padding)
         out = self.layers(x)
-        
+
         if self.use_skip_connection:
             return x_original + out
         else:
@@ -125,13 +125,14 @@ class InvertedBottleneckResidualBlock(nn.Module):
 
 class MobileNetV2(nn.Module):
     """
-    The architecture is: 
+    The architecture is:
     ConvBNReLu6 -> InvertedBottleneckResidualBlocks -> classifier
 
     Note:
-    - The classifier does NOT have sigmoid at the end. This is trained for multi-label classification, 
+    - The classifier does NOT have sigmoid at the end. This is trained for multi-label classification,
     abd the sigmoid etc. is handled in the loss.
     """
+
     def __init__(
         self,
         num_classes=1000,
@@ -189,7 +190,7 @@ class MobileNetV2(nn.Module):
                             stride=1,
                             dilation=dilation,
                             expansion_factor=expansion_factor,
-                            have_relu=True
+                            have_relu=True,
                         )
                     )
                 input_channel = output_channel

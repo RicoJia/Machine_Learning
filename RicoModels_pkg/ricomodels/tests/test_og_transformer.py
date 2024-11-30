@@ -1,14 +1,16 @@
+import pytest
 import torch
 from ricomodels.og_transformer.og_transformer_encoder import (
-    OGPositionalEncoder,
     DotProductAttention,
-    MultiHeadAttention,
+    Encoder,
     EncoderLayer,
+    MultiHeadAttention,
+    OGPositionalEncoder,
 )
 from ricomodels.utils.predict_tools import allclose_replace_nan
-import pytest
 
 
+# TODO: this can be re-orged
 @pytest.fixture
 def basic_config():
     return {
@@ -306,6 +308,8 @@ NUM_QUERIES = 4
 EMBEDDING_DIM = 16
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
+INPUT_TOKEN_SIZE = 100
+MAX_SENTENCE_LENGTH = 50
 
 
 @pytest.fixture
@@ -429,3 +433,38 @@ def test_parameter_variations(
     assert (
         output.shape == input_tensor.shape
     ), f"Mismatch in output shape for embedding_dim={embedding_dim}, num_heads={num_heads}, dropout_rate={dropout_rate}"
+
+
+##################################################################################################
+
+
+@pytest.fixture
+def input_tokens():
+    """Fixture to create a random input tensor."""
+    # What does tokens look like? NUM_QUERIES?
+    seq_length = torch.randint(low=0, high=MAX_SENTENCE_LENGTH, size=(1,)).item()
+    return torch.randint(
+        low=0, high=INPUT_TOKEN_SIZE, size=(BATCH_SIZE, seq_length), dtype=torch.long
+    )
+
+
+@pytest.fixture
+def full_encoder():
+    """Fixture to create an EncoderLayer instance."""
+    return Encoder(
+        input_vocab_dim=INPUT_TOKEN_SIZE,
+        encoder_layer_num=2,
+        max_sentence_length=MAX_SENTENCE_LENGTH,
+        embedding_dim=EMBEDDING_DIM,
+        num_heads=NUM_HEADS,
+        dropout_rate=DROPOUT_RATE,
+    )
+
+
+def test_encoder_output_shape(full_encoder, input_tokens, attn_mask, key_padding_mask):
+    """Test if the output shape matches the input shape."""
+    print(f"Rico: {input_tokens.shape}")
+    output = full_encoder(input_tokens, attn_mask, key_padding_mask)
+    # assert (
+    #     output.shape == input_tensor.shape
+    # ), f"Expected output shape {input_tensor.shape}, got {output.shape}"

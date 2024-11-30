@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 
-from ricomodels.utils.data_loading import (
-    get_package_dir,
-    PredictDataset,
-    COCODataset,
-    TaskMode,
-    CLASSIFICATION_PRED_TRANSFORMS,
-)
-from ricomodels.backbones.mobilenetv2.mobilenet_v2 import MobileNetV2
-from ricomodels.utils.predict_tools import (
-    resize_prediction,
-)
-from ricomodels.utils.training_tools import load_model
-from ricomodels.utils.visualization import visualize_image_class_names
-import torch
-from torch.nn import functional as F
-from torchvision import models
 import os
 from typing import List, Tuple
-from tqdm import tqdm
+
 import numpy as np
-from ricomodels.utils.losses import FocalLoss, MULTICLASS_CLASSIFICATION_THRE
+import torch
+from ricomodels.backbones.mobilenetv2.mobilenet_v2 import MobileNetV2
+from ricomodels.utils.data_loading import (
+    CLASSIFICATION_PRED_TRANSFORMS,
+    COCODataset,
+    PredictDataset,
+    TaskMode,
+    get_package_dir,
+)
+from ricomodels.utils.losses import MULTICLASS_CLASSIFICATION_THRE, FocalLoss
+from ricomodels.utils.predict_tools import resize_prediction
+from ricomodels.utils.training_tools import load_model
+from ricomodels.utils.visualization import visualize_image_class_names
+from torch.nn import functional as F
+from torchvision import models
+from tqdm import tqdm
 
 
 class BackbonePredictBench:
@@ -65,8 +64,8 @@ class BackbonePredictBench:
 
 
 if __name__ == "__main__":
-    from PIL import Image
     import matplotlib.pyplot as plt
+    from PIL import Image
 
     val_dataset = COCODataset(
         split="val", task_mode=TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION

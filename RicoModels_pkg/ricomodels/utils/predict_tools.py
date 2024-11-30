@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import torch.nn.functional as F
-import torch
 import numpy as np
+import torch
+import torch.nn.functional as F
 
 
 def allclose_replace_nan(tensor1, tensor2, rtol=1e-05, atol=1e-08, sentinel=0.0):
