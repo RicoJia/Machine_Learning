@@ -28,7 +28,7 @@ class OGPositionalEncoder(torch.nn.Module):
 def create_padding_mask(padded_token_ids):
     # We assume this has been trucated, then padded with 0 (for short sentences)
     # [Batch_size, Time]
-    mask = (padded_token_ids != 0).float()
+    mask = (padded_token_ids == 0).bool()
     return mask
 
 
@@ -71,12 +71,14 @@ class DotProductAttention(torch.nn.Module):
         if attn_mask is not None:
             if attn_mask.ndim == 2:
                 attn_mask = attn_mask.unsqueeze(0)
+
+            # seq_length, head, embedding_dim
             q_kT_scaled.masked_fill_(attn_mask.bool(), float("-inf"))
         if key_padding_mask is not None:
             key_padding_mask = key_padding_mask.unsqueeze(1)
             if q_kT_scaled.ndim == 4:
+                # [batch_size, query_num, kv_num]
                 key_padding_mask = key_padding_mask.unsqueeze(2)
-            # [batch_size, query_num, kv_num]
             q_kT_scaled = q_kT_scaled.masked_fill(
                 key_padding_mask,
                 float("-inf"),
@@ -140,7 +142,9 @@ class MultiHeadAttention(torch.nn.Module):
             q=q, k=k, v=v, attn_mask=attn_mask, key_padding_mask=key_padding_mask
         )
         # [query_num, batch_size, head_num, head_embed_dim]
-        attention = attention.permute(2, 0, 1, 3).contiguous()  # TODO? .contiguous()
+        attention = attention.permute(
+            2, 0, 1, 3
+        ).contiguous()  # Any call before view() requires contiguous data
         attention = attention.view(num_queries, batch_size, self.embedding_dim)
         attention_output = self.out_proj(attention)
         return attention_output
@@ -178,7 +182,7 @@ class EncoderLayer(torch.nn.Module):
         self.dropout2 = torch.nn.Dropout(p=dropout_rate)
 
     def forward(self, X, attn_mask, key_padding_mask):
-        # Self attention (batch_size, input_seq_len, embedding_dim)
+        # Self attention (input_seq_len, batch_size, embedding_dim)
         self_attn_output = self.mha(
             X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask
         )
@@ -189,15 +193,15 @@ class EncoderLayer(torch.nn.Module):
         # Applying Skip Connection
         mult_attn_out = self.layernorm1(
             X + self_attn_output
-        )  # (batch_size, input_seq_len, embedding_dim)
+        )  # (input_seq_len, batch_size, embedding_dim)
         ffn_output = self.ffn(
             mult_attn_out
-        )  # (batch_size, input_seq_len, embedding_dim)
+        )  # (input_seq_len, batch_size, embedding_dim)
         ffn_output = self.dropout2(ffn_output)
         # Applying Skip Connection
         encoder_layer_out = self.layernorm2(
             ffn_output + mult_attn_out
-        )  # (batch_size, input_seq_len, embedding_dim)
+        )  # (input_seq_len, batch_size, embedding_dim)
         return encoder_layer_out
 
 
@@ -231,18 +235,22 @@ class Encoder(torch.nn.Module):
             ]
         )
 
-    def forward(self, X, attn_mask, key_padding_mask):
+    def forward(self, X):
         # X: [Batch_Size, Sentence_length]
+        key_padding_mask = create_padding_mask(X)
         X = self.embedding_converter(
             X
         )  # X: [Batch_Size, Sentence_length, embedding_size]
         X /= math.sqrt(float(self.embedding_dim))
+        # [Batch_Size, Sentence_length, embedding_dim]
         X = self.positional_encoder(X)  # applies positional encoding in addition
-        # TODO Remember to remove
-        print(f"X.shape: {X.shape}")
         X = self.dropout_pre_encoder(X)
+
+        attn_mask = create_look_ahead_mask(sequence_length=X.shape[1])  # TODO?
+        X = X.permute(1, 0, 2)  # [input_seq_len, batch_size, qk_dim]
         for encoder_layer in self.encoder_layers:
             X = encoder_layer(X, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+        X = X.permute(1, 0, 2)  # [batch_size, input_seq_len, qk_dim]
         return X
 
 

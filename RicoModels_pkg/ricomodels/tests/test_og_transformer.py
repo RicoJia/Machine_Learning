@@ -316,9 +316,9 @@ MAX_SENTENCE_LENGTH = 50
 def key_padding_mask():
     """As long as the attention_weight is longer than 2 elements,
     we should never have a row being completely masked out"""
-    mask = torch.zeros(BATCH_SIZE, NUM_KEYS).bool()
-    mask[:, -1:] = True
-    return mask
+    mask = torch.zeros(BATCH_SIZE, NUM_KEYS)
+    mask[:, -1:] = 1
+    return mask.bool()
 
 
 @pytest.fixture
@@ -440,11 +440,12 @@ def test_parameter_variations(
 
 @pytest.fixture
 def input_tokens():
-    """Fixture to create a random input tensor."""
-    # What does tokens look like? NUM_QUERIES?
-    seq_length = torch.randint(low=0, high=MAX_SENTENCE_LENGTH, size=(1,)).item()
+    # seq_length = torch.randint(low=0, high=MAX_SENTENCE_LENGTH, size=(1,)).item()
     return torch.randint(
-        low=0, high=INPUT_TOKEN_SIZE, size=(BATCH_SIZE, seq_length), dtype=torch.long
+        low=0,
+        high=INPUT_TOKEN_SIZE,
+        size=(BATCH_SIZE, MAX_SENTENCE_LENGTH),
+        dtype=torch.long,
     )
 
 
@@ -461,10 +462,61 @@ def full_encoder():
     )
 
 
-def test_encoder_output_shape(full_encoder, input_tokens, attn_mask, key_padding_mask):
+def test_encoder_output_shape(full_encoder, input_tokens):
     """Test if the output shape matches the input shape."""
-    print(f"Rico: {input_tokens.shape}")
-    output = full_encoder(input_tokens, attn_mask, key_padding_mask)
-    # assert (
-    #     output.shape == input_tensor.shape
-    # ), f"Expected output shape {input_tensor.shape}, got {output.shape}"
+    output = full_encoder(input_tokens)
+    # TODO Remember to remove
+    print(f"Rico: {output.shape}")
+    expected_shape = (BATCH_SIZE, MAX_SENTENCE_LENGTH, EMBEDDING_DIM)
+    assert (
+        output.shape == expected_shape
+    ), f"Expected output shape {expected_shape}, got {output.shape}"
+
+
+# def test_encoder():
+#     encoder = torch.nn.TransformerEncoderLayer(
+#             d_model=embedding_dim,
+#             nhead=num_heads,
+#             dim_feedforward=ff_dim,
+#             batch_first=True
+#         )
+# def full_transformer_test():
+#     """Fixture to create a random input tensor."""
+#     sentences = [
+#             # enc_input           dec_input         dec_output
+#             ['ich mochte ein bier P', 'S i want a beer .', 'i want a beer . E'],
+#             ['ich mochte ein cola P', 'S i want a coke .', 'i want a coke . E']
+#     ]
+#     # Padding Should be Zero
+#     source_vocab = {'P' : 0, 'ich' : 1, 'mochte' : 2, 'ein' : 3, 'bier' : 4, 'cola' : 5}
+#     source_vocab_size = len(source_vocab)
+#     target_vocab = {'P' : 0, 'i' : 1, 'want' : 2, 'a' : 3, 'beer' : 4, 'coke' : 5, 'S' : 6, 'E' : 7, '.' : 8}
+#     idx2word = {i: w for i, w in enumerate(target_vocab)}
+#     # What does tokens look like? NUM_QUERIES?
+#     source_len = 5 # max length of input sequence
+#     target_len = 6
+
+#     def make_data(sentences):
+#         encoder_inputs, decoder_inputs, decoder_outputs = [], [], []
+#         for i in range(len(sentences)):
+#             encoder_input = [source_vocab[word] for word in sentences[i][0].split()]
+#             decoder_input = [target_vocab[word] for word in sentences[i][1].split()]
+#             decoder_output = [target_vocab[word] for word in sentences[i][2].split()]
+#             encoder_inputs.append(encoder_input)
+#             decoder_inputs.append(decoder_input)
+#             decoder_outputs.append(decoder_output)
+
+#         return torch.LongTensor(encoder_inputs), torch.LongTensor(decoder_inputs), torch.LongTensor(decoder_outputs)
+
+#     class Seq2SeqDataset(torch.utils.data.Dataset):
+#         def __init__(self, encoder_input, decoder_input, decoder_output):
+#             super(Seq2SeqDataset, self).__init__()
+#             self.encoder_input = encoder_input
+#             self.decoder_input = decoder_input
+#             self.decoder_output = decoder_output
+
+#         def __len__(self):
+#             return self.encoder_input.shape[0]
+
+#         def __getitem__(self, idx):
+#             return self.encoder_input[idx], self.decoder_input[idx], self.decoder_output[idx]
