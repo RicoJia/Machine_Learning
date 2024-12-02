@@ -13,6 +13,11 @@ from ricomodels.og_transformer.og_transformer import (
 from ricomodels.utils.predict_tools import allclose_replace_nan
 import math
 
+
+##################################################################################################
+## Constants and Configs
+##################################################################################################
+
 # TODO: this can be re-orged
 @pytest.fixture
 def basic_config():
@@ -29,7 +34,7 @@ def basic_config():
 
 
 BATCH_SIZE = 16
-# TODO: NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
+# NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
 NUM_KEYS = 50
 NUM_QUERIES = 50
 EMBEDDING_DIM = 16
@@ -375,8 +380,6 @@ def test_gradient_flow_no_mask(encoder_layer, input_tensor):
     loss = output.sum()
     loss.backward()
     assert input_tensor.grad is not None, "Gradients did not flow back to the input."
-    # TODO Remember to remove
-    print(f"input_tensor.grad.abs().sum(): {input_tensor.grad.abs().sum()}")
     assert input_tensor.grad.abs().sum() > 0, "Gradients are zero."
 
 
@@ -386,8 +389,6 @@ def test_gradient_flow(encoder_layer, input_tensor, attn_mask, key_padding_mask)
     loss = output.sum()
     loss.backward()
     assert input_tensor.grad is not None, "Gradients did not flow back to the input."
-    # TODO Remember to remove
-    print(f"input_tensor.grad.abs().sum(): {input_tensor.grad.abs().sum()}")
     assert input_tensor.grad.abs().sum() > 0, "Gradients are zero."
 
 
@@ -797,6 +798,8 @@ def test_decoder(input_tokens, input_tensor, attn_mask, key_padding_mask):
             lookahead_mask=attn_mask,
             key_padding_mask=key_padding_mask,
         )
+        # TODO: this is a small discrepancy with the torch implementation
+        enc_out = input_tensor.clone().permute(1, 0, 2)
         custom_out = custom_decoder(
             X=target_sequence,
             enc_output=enc_out,
@@ -824,26 +827,20 @@ class PyTorchTransformer(torch.nn.Module):
         dim_feedforward=2048,
     ):
         super(PyTorchTransformer, self).__init__()
-
-        # Embedding layers
         self.encoder_embedding = torch.nn.Embedding(
             num_embeddings=input_vocab_dim, embedding_dim=embedding_dim
         )
         self.decoder_embedding = torch.nn.Embedding(
             num_embeddings=target_vocab_dim, embedding_dim=embedding_dim
         )
-        # Positional encodings
         self.encoder_positional_encoding = OGPositionalEncoder(
             max_sentence_length, embedding_dim
         )
         self.decoder_positional_encoding = OGPositionalEncoder(
             max_sentence_length, embedding_dim
         )
-
-        # Dropout
         self.encoder_dropout = torch.nn.Dropout(p=dropout_rate)
         self.decoder_dropout = torch.nn.Dropout(p=dropout_rate)
-
         self.transformer = torch.nn.Transformer(
             d_model=embedding_dim,
             nhead=num_heads,
@@ -853,7 +850,6 @@ class PyTorchTransformer(torch.nn.Module):
             dropout=dropout_rate,
             activation="relu",
         )
-        # Final projection
         self.final_dense = torch.nn.Linear(embedding_dim, target_vocab_dim, bias=False)
         self.final_relu = torch.nn.ReLU()
         self.final_softmax = torch.nn.Softmax(dim=-1)
@@ -920,7 +916,6 @@ class PyTorchTransformer(torch.nn.Module):
                     torch_layer=torch_dec_layer.norm2,
                     my_layer=custom_dec_layer.layernorm2,
                 )
-
             copy_weights_linear_layer(
                 torch_layer=self.final_dense, my_layer=custom_model.final_dense_layer
             )
@@ -928,7 +923,6 @@ class PyTorchTransformer(torch.nn.Module):
     def forward(
         self, src, tgt, src_key_padding_mask, tgt_key_padding_mask, tgt_mask=None
     ):
-        # Embedding and positional encoding for encoder
         src_emb = self.encoder_embedding(
             src
         )  # [batch_size, src_seq_len, embedding_dim]
@@ -1012,4 +1006,4 @@ def test_transformer_against_pytorch(
             attn_mask=attn_mask,  # [tgt_seq_length, tgt_seq_length]
             dec_padding_mask=key_padding_mask,  # [batch_size, tgt_seq_length]
         )  # [batch_size, tgt_seq_length, target_vocab_dim]
-        # torch.allclose(torch_logits, custom_logits, atol=1e-6, rtol=1e-4)
+        torch.allclose(torch_logits, custom_logits, atol=1e-6, rtol=1e-4)

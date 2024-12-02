@@ -280,7 +280,7 @@ class DecoderLayer(torch.nn.Module):
     def forward(self, X, enc_output, attn_mask, key_padding_mask):
         """
         Args:
-            X : embedding from output sequence
+            X : embedding from output sequence [output_seq_len, batch_size, qk_dim]
             enc_output : embedding from encoder
             attn_mask : Boolean mask for the target_input to ensure autoregression
             key_padding_mask : Boolean mask for the second multihead attention layer
@@ -288,7 +288,6 @@ class DecoderLayer(torch.nn.Module):
         Returns:
             decoder output:
         """
-        # Self attention (output_seq_len, batch_size, embedding_dim)
         self_attn_output = self.mha1(
             X, X, X, attn_mask=attn_mask, key_padding_mask=None
         )
@@ -357,12 +356,22 @@ class Decoder(torch.nn.Module):
         )
 
     def forward(self, X, enc_output, lookahead_mask, key_padding_mask):
+        """
+        Args:
+            X : [batch_size, output_sentences_length]
+            enc_output : [batch_size, input_seq_len, qk_dim].
+                TODO: This might be a small discrepancy from the torch implementation, which is [input_seq_len, batch_size, qk_dim]
+            lookahead_mask : [num_queries, num_keys]
+            key_padding_mask : [batch_size, num_keys]
+        """
         #  [batch_size, output_sentences_length]
         X = self.embedding_converter(X)
         X *= math.sqrt(float(self.embedding_dim))
         X = self.positional_encoder(X)  # applies positional encoding in addition
         X = self.dropout_pre_decoder(X)
         X = X.permute(1, 0, 2)  # [output_seq_len, batch_size, qk_dim]
+        enc_output = enc_output.permute(1, 0, 2)
+        # [num_keys, batch_size, qk_dim]
         for decoder_layer in self.dec_layers:
             X = decoder_layer(
                 X,
@@ -424,7 +433,6 @@ class Transformer(torch.nn.Module):
         # input_sentences: [Batch_Size, input_sentences_length]
         # [batch_size, input_seq_len, qk_dim]
         enc_output = self.encoder(X=input_sentences, enc_padding_mask=enc_padding_mask)
-        # TODO: review: how does input_sequence blend into output_sequence?
         # [batch_size, output_seq_len, qk_dim]
         dec_output = self.decoder(
             X=output_sentences,
@@ -435,8 +443,8 @@ class Transformer(torch.nn.Module):
         # This is basically the raw logits.
         # THIS IS ASSUMING THAT WE ARE USING CROSS_ENTROPY LOSS
         # [batch_size, output_seq_len,target_vocab_dim]
-        # logits = self.final_dense_layer(dec_output)
-        # return logits
+        logits = self.final_dense_layer(dec_output)
+        return logits
 
 
 def _plot_positional_encoder(
