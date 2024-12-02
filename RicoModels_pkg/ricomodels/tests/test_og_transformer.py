@@ -6,6 +6,9 @@ from ricomodels.og_transformer.og_transformer import (
     EncoderLayer,
     MultiHeadAttention,
     OGPositionalEncoder,
+    DecoderLayer,
+    Decoder,
+    Transformer,
 )
 from ricomodels.utils.predict_tools import allclose_replace_nan
 import math
@@ -24,11 +27,25 @@ def basic_config():
         "v_dim": 6,
     }
 
+
+BATCH_SIZE = 16
+# TODO: NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
+NUM_KEYS = 50
+NUM_QUERIES = 50
+EMBEDDING_DIM = 16
+NUM_HEADS = 8
+DROPOUT_RATE = 0.1
+INPUT_TOKEN_SIZE = 100
+OUTPUT_TOKEN_SIZE = 150
+MAX_SENTENCE_LENGTH = 50
+ENCODER_LAYER_NUM = 2
+DECODER_LAYER_NUM = 2
 torch.manual_seed(42)
 
 ##################################################################################################
 ## Positional Encoder, Scaled-Dot Attention, Multi-Head Attention
 ##################################################################################################
+
 
 def test_og_positional_encoder(basic_config):
     batch_size = basic_config["batch_size"]
@@ -239,6 +256,7 @@ def test_scaled_dot_product_numerical_precision():
     assert not torch.isnan(output).any(), "Output contains NaNs."
     assert not torch.isinf(output).any(), "Output contains Infs."
 
+
 def copy_weights_multi_head_attn(my_mha, torch_mha):
     with torch.no_grad():
         in_proj_weight = torch.cat(
@@ -246,6 +264,7 @@ def copy_weights_multi_head_attn(my_mha, torch_mha):
         )
         torch_mha.in_proj_weight.copy_(in_proj_weight)
         torch_mha.out_proj.weight.copy_(my_mha.out_proj.weight)
+
 
 def test_multi_head_attention():
     """
@@ -309,16 +328,6 @@ def test_multi_head_attention():
 ## Encoder Layer Tests
 ##################################################################################################
 
-BATCH_SIZE = 16
-# TODO: NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
-NUM_KEYS = 50
-NUM_QUERIES = 50
-EMBEDDING_DIM = 16
-NUM_HEADS = 8
-DROPOUT_RATE = 0.1
-INPUT_TOKEN_SIZE = 100
-MAX_SENTENCE_LENGTH = 50
-ENCODER_LAYER_NUM = 2
 
 @pytest.fixture
 def key_padding_mask():
@@ -442,47 +451,66 @@ def test_parameter_variations(
         output.shape == input_tensor.shape
     ), f"Mismatch in output shape for embedding_dim={embedding_dim}, num_heads={num_heads}, dropout_rate={dropout_rate}"
 
+
 def copy_weights_linear_layer(my_layer, torch_layer):
-    torch_layer.weight.copy_(my_layer.weight)
-    torch_layer.bias.copy_(my_layer.bias)
+    with torch.no_grad():
+        torch_layer.weight.copy_(my_layer.weight)
+        if my_layer.bias is not None:
+            torch_layer.bias.copy_(my_layer.bias)
+
 
 def copy_weights_layer_norm(my_layer, torch_layer):
-    my_layer.weight = torch_layer.weight
-    my_layer.bias = torch_layer.bias
+    with torch.no_grad():
+        my_layer.weight.copy_(torch_layer.weight)
+        my_layer.bias.copy_(torch_layer.bias)
+
 
 def copy_weights_encoder_layer(torch_encoder_layer, my_encoder_layer):
     # Copy self-attention weights
-    copy_weights_multi_head_attn(my_mha=my_encoder_layer.mha, torch_mha=torch_encoder_layer.self_attn)
+    copy_weights_multi_head_attn(
+        my_mha=my_encoder_layer.mha, torch_mha=torch_encoder_layer.self_attn
+    )
     # # Copy feed-forward network weights
     with torch.no_grad():
-        copy_weights_linear_layer(my_layer= my_encoder_layer.ffn.dense1, torch_layer=torch_encoder_layer.linear1)
-        copy_weights_linear_layer(my_layer= my_encoder_layer.ffn.dense2, torch_layer=torch_encoder_layer.linear2)
-        copy_weights_layer_norm(my_layer=my_encoder_layer.layernorm1, torch_layer=torch_encoder_layer.norm1)
-        copy_weights_layer_norm(my_layer=my_encoder_layer.layernorm2, torch_layer=torch_encoder_layer.norm2)
+        copy_weights_linear_layer(
+            my_layer=my_encoder_layer.ffn.dense1,
+            torch_layer=torch_encoder_layer.linear1,
+        )
+        copy_weights_linear_layer(
+            my_layer=my_encoder_layer.ffn.dense2,
+            torch_layer=torch_encoder_layer.linear2,
+        )
+        copy_weights_layer_norm(
+            my_layer=my_encoder_layer.layernorm1, torch_layer=torch_encoder_layer.norm1
+        )
+        copy_weights_layer_norm(
+            my_layer=my_encoder_layer.layernorm2, torch_layer=torch_encoder_layer.norm2
+        )
+
 
 def test_encoder_layer(input_tensor, attn_mask, key_padding_mask):
     encoder_layer = EncoderLayer(
         embedding_dim=EMBEDDING_DIM, num_heads=NUM_HEADS, dropout_rate=DROPOUT_RATE
     )
-    built_in_encoder_layer = torch.nn.TransformerEncoderLayer(d_model=EMBEDDING_DIM, nhead=NUM_HEADS,
-                                                    dim_feedforward=EMBEDDING_DIM,
-                                                    dropout=DROPOUT_RATE)
+    built_in_encoder_layer = torch.nn.TransformerEncoderLayer(
+        d_model=EMBEDDING_DIM,
+        nhead=NUM_HEADS,
+        dim_feedforward=EMBEDDING_DIM,
+        dropout=DROPOUT_RATE,
+    )
     copy_weights_encoder_layer(built_in_encoder_layer, encoder_layer)
-    
+
     encoder_layer.eval()
     built_in_encoder_layer.eval()
     with torch.no_grad():
         my_out = encoder_layer(
-            X=input_tensor,
-            attn_mask=attn_mask,
-            key_padding_mask=key_padding_mask
+            X=input_tensor, attn_mask=attn_mask, key_padding_mask=key_padding_mask
         )
         torch_out = built_in_encoder_layer(
-            src=input_tensor,
-            src_mask=attn_mask,
-            src_key_padding_mask=key_padding_mask
+            src=input_tensor, src_mask=attn_mask, src_key_padding_mask=key_padding_mask
         )
     torch.allclose(torch_out, my_out, atol=1e-6, rtol=1e-4)
+
 
 ##################################################################################################
 ## Encoder Tests
@@ -499,6 +527,7 @@ def input_tokens():
         dtype=torch.long,
     )
 
+
 @pytest.fixture
 def full_encoder():
     """Fixture to create an EncoderLayer instance."""
@@ -511,28 +540,40 @@ def full_encoder():
         dropout_rate=DROPOUT_RATE,
     )
 
+
 class TestableTorchEncoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.built_in_encoder_layer = torch.nn.TransformerEncoderLayer(d_model=EMBEDDING_DIM, nhead=NUM_HEADS,
-                                                        dim_feedforward=EMBEDDING_DIM,
-                                                        dropout=DROPOUT_RATE)
-        self.torch_embedding = torch.nn.Embedding(num_embeddings=INPUT_TOKEN_SIZE, embedding_dim=EMBEDDING_DIM)
+        self.built_in_encoder_layer = torch.nn.TransformerEncoderLayer(
+            d_model=EMBEDDING_DIM,
+            nhead=NUM_HEADS,
+            dim_feedforward=EMBEDDING_DIM,
+            dropout=DROPOUT_RATE,
+        )
+        self.torch_embedding = torch.nn.Embedding(
+            num_embeddings=INPUT_TOKEN_SIZE, embedding_dim=EMBEDDING_DIM
+        )
         self.torch_positional_encoding = OGPositionalEncoder(
-                        max_sentence_length=MAX_SENTENCE_LENGTH, embedding_size=EMBEDDING_DIM)
+            max_sentence_length=MAX_SENTENCE_LENGTH, embedding_size=EMBEDDING_DIM
+        )
         self.torch_encoder = torch.nn.TransformerEncoder(
-            encoder_layer=self.built_in_encoder_layer,
-            num_layers=ENCODER_LAYER_NUM
+            encoder_layer=self.built_in_encoder_layer, num_layers=ENCODER_LAYER_NUM
         )
         self.torch_dropout = torch.nn.Dropout(p=DROPOUT_RATE)
 
     def copy_weights(self, custom_encoder):
-        self.torch_embedding.weight.data.copy_(custom_encoder.embedding_converter.weight.data.clone())
-        self.torch_positional_encoding.positional_embedding.copy_(custom_encoder.positional_encoder.positional_embedding)
+        self.torch_embedding.weight.data.copy_(
+            custom_encoder.embedding_converter.weight.data.clone()
+        )
+        self.torch_positional_encoding.positional_embedding.copy_(
+            custom_encoder.positional_encoder.positional_embedding
+        )
         for i in range(ENCODER_LAYER_NUM):
             torch_layer = self.torch_encoder.layers[i]
             custom_layer = custom_encoder.encoder_layers[i]
-            copy_weights_encoder_layer(my_encoder_layer=custom_layer, torch_encoder_layer=torch_layer)
+            copy_weights_encoder_layer(
+                my_encoder_layer=custom_layer, torch_encoder_layer=torch_layer
+            )
 
     def forward(self, X, key_padding_mask):
         torch_X = self.torch_embedding(X) * math.sqrt(EMBEDDING_DIM)
@@ -540,25 +581,11 @@ class TestableTorchEncoder(torch.nn.Module):
         torch_X = self.torch_dropout(torch_X)
         torch_X = torch_X.permute(1, 0, 2)  # (seq_length, batch_size, embedding_dim)
         torch_out = self.torch_encoder(
-            src=torch_X,
-            mask=None,
-            src_key_padding_mask=key_padding_mask
+            src=torch_X, mask=None, src_key_padding_mask=key_padding_mask
         )
         torch_out = torch_out.permute(1, 0, 2)  # [batch_size, input_seq_len, qk_dim]
         return torch_out
 
-# def initialize_encoders(torch_encoder, my_encoder):
-#     for built_in_layer, my_layer in zip(torch_encoder.layers, my_encoder.layers):
-#         my_layer.ffn.dense1.load_state_dict(built_in_layer.linear1.state_dict())
-#         my_layer.ffn.dense2.load_state_dict(built_in_layer.linear2.state_dict())
-#         my_layer.mha.load_state_dict(built_in_layer.self_attn.state_dict())
-        
-#         # Copy layer normalization weights
-#         my_layer.layernorm1.load_state_dict(built_in_layer.norm1.state_dict())
-#         my_layer.layernorm2.load_state_dict(built_in_layer.norm2.state_dict()) 
-
-def copy_encoder_weights(custom_encoder, torch_encoder):
-    torch_encoder.embedding_converter.weight.data.copy_(custom_encoder.embedding_converter.weight.data.clone())
 
 def test_encoder_output_shape(full_encoder, input_tokens):
     """Test if the output shape matches the input shape."""
@@ -568,7 +595,7 @@ def test_encoder_output_shape(full_encoder, input_tokens):
         output.shape == expected_shape
     ), f"Expected output shape {expected_shape}, got {output.shape}"
 
-    
+
 def test_encoder(input_tensor, attn_mask, key_padding_mask):
     custom_encoder = Encoder(
         embedding_dim=EMBEDDING_DIM,
@@ -576,7 +603,7 @@ def test_encoder(input_tensor, attn_mask, key_padding_mask):
         encoder_layer_num=ENCODER_LAYER_NUM,
         num_heads=NUM_HEADS,
         max_sentence_length=MAX_SENTENCE_LENGTH,
-        dropout_rate=DROPOUT_RATE
+        dropout_rate=DROPOUT_RATE,
     )
     torch_encoder = TestableTorchEncoder()
     with torch.no_grad():
@@ -585,52 +612,404 @@ def test_encoder(input_tensor, attn_mask, key_padding_mask):
     torch_encoder.eval()
     custom_encoder.eval()
 
-    X = torch.randint(0, INPUT_TOKEN_SIZE, (BATCH_SIZE, MAX_SENTENCE_LENGTH))  # Random input indices
+    X = torch.randint(
+        0, INPUT_TOKEN_SIZE, (BATCH_SIZE, MAX_SENTENCE_LENGTH)
+    )  # Random input indices
 
     with torch.no_grad():
         torch_out = torch_encoder(X, key_padding_mask)
-        custom_out = custom_encoder(
-            X=X,
-            enc_padding_mask=key_padding_mask
+        custom_out = custom_encoder(X=X, enc_padding_mask=key_padding_mask)
+        torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
+
+
+##################################################################################################
+## Decoder Tests
+##################################################################################################
+
+
+def copy_decoder_layer_weights(torch_layer, custom_layer):
+    copy_weights_multi_head_attn(
+        my_mha=custom_layer.mha1, torch_mha=torch_layer.self_attn
+    )
+    copy_weights_multi_head_attn(
+        my_mha=custom_layer.mha2, torch_mha=torch_layer.multihead_attn
+    )
+    copy_weights_linear_layer(
+        my_layer=custom_layer.ffn.dense1, torch_layer=torch_layer.linear1
+    )
+    copy_weights_linear_layer(
+        my_layer=custom_layer.ffn.dense2, torch_layer=torch_layer.linear2
+    )
+    copy_weights_layer_norm(
+        my_layer=custom_layer.layernorm1, torch_layer=torch_layer.norm1
+    )
+    copy_weights_layer_norm(
+        my_layer=custom_layer.layernorm2, torch_layer=torch_layer.norm2
+    )
+    copy_weights_layer_norm(
+        my_layer=custom_layer.layernorm3, torch_layer=torch_layer.norm3
+    )
+
+
+def test_decoder_layer(input_tensor, attn_mask, key_padding_mask):
+    """In this test, we choose target_sequence and encoder_output to be input_tensor
+    Which is a simplification. They might have different dimensions:
+        (tgt_seq_length, batch_size, embedding_dim)
+        (memory_seq_length, batch_size, embedding_dim)
+    """
+    torch_decoder_layer = torch.nn.TransformerDecoderLayer(
+        d_model=EMBEDDING_DIM,
+        nhead=NUM_HEADS,
+        dim_feedforward=EMBEDDING_DIM,
+        dropout=DROPOUT_RATE,
+        activation="relu",
+    )
+    custom_decoder_layer = DecoderLayer(
+        embedding_dim=EMBEDDING_DIM, num_heads=NUM_HEADS, dropout_rate=DROPOUT_RATE
+    )
+    copy_decoder_layer_weights(
+        torch_layer=torch_decoder_layer, custom_layer=custom_decoder_layer
+    )
+    torch_decoder_layer.eval()
+    custom_decoder_layer.eval()
+
+    with torch.no_grad():
+        target_sequence = input_tensor
+        enc_out = input_tensor.clone()
+        torch_out = torch_decoder_layer(
+            tgt=target_sequence,
+            memory=enc_out,
+            tgt_mask=attn_mask,
+            memory_mask=None,
+            tgt_key_padding_mask=key_padding_mask,  # for masking key padding
+            memory_key_padding_mask=key_padding_mask,
+        )
+        custom_out = custom_decoder_layer(
+            X=target_sequence,
+            enc_output=enc_out,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
         )
         torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
-# def full_transformer_test():
-#     """Fixture to create a random input tensor."""
-#     sentences = [
-#             # enc_input           dec_input         dec_output
-#             ['ich mochte ein bier P', 'S i want a beer .', 'i want a beer . E'],
-#             ['ich mochte ein cola P', 'S i want a coke .', 'i want a coke . E']
-#     ]
-#     # Padding Should be Zero
-#     source_vocab = {'P' : 0, 'ich' : 1, 'mochte' : 2, 'ein' : 3, 'bier' : 4, 'cola' : 5}
-#     source_vocab_size = len(source_vocab)
-#     target_vocab = {'P' : 0, 'i' : 1, 'want' : 2, 'a' : 3, 'beer' : 4, 'coke' : 5, 'S' : 6, 'E' : 7, '.' : 8}
-#     idx2word = {i: w for i, w in enumerate(target_vocab)}
-#     # What does tokens look like? NUM_QUERIES?
-#     source_len = 5 # max length of input sequence
-#     target_len = 6
 
-#     def make_data(sentences):
-#         encoder_inputs, decoder_inputs, decoder_outputs = [], [], []
-#         for i in range(len(sentences)):
-#             encoder_input = [source_vocab[word] for word in sentences[i][0].split()]
-#             decoder_input = [target_vocab[word] for word in sentences[i][1].split()]
-#             decoder_output = [target_vocab[word] for word in sentences[i][2].split()]
-#             encoder_inputs.append(encoder_input)
-#             decoder_inputs.append(decoder_input)
-#             decoder_outputs.append(decoder_output)
 
-#         return torch.LongTensor(encoder_inputs), torch.LongTensor(decoder_inputs), torch.LongTensor(decoder_outputs)
+class PyTorchDecoder(torch.nn.Module):
+    def __init__(
+        self,
+        embedding_dim,
+        num_heads,
+        target_vocab_dim,
+        decoder_layer_num,
+        max_sentence_length,
+        dropout_rate=0.1,
+        dim_feedforward=2048,
+    ):
+        super(PyTorchDecoder, self).__init__()
+        self.embedding_dim = embedding_dim
+        self.embedding = torch.nn.Embedding(
+            num_embeddings=target_vocab_dim, embedding_dim=embedding_dim
+        )
+        self.positional_encoding = OGPositionalEncoder(
+            max_sentence_length, embedding_dim
+        )
+        self.dropout = torch.nn.Dropout(p=dropout_rate)
+        decoder_layer = torch.nn.TransformerDecoderLayer(
+            d_model=embedding_dim,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout_rate,
+            activation="relu",
+        )
+        self.transformer_decoder = torch.nn.TransformerDecoder(
+            decoder_layer=decoder_layer, num_layers=decoder_layer_num
+        )
 
-#     class Seq2SeqDataset(torch.utils.data.Dataset):
-#         def __init__(self, encoder_input, decoder_input, decoder_output):
-#             super(Seq2SeqDataset, self).__init__()
-#             self.encoder_input = encoder_input
-#             self.decoder_input = decoder_input
-#             self.decoder_output = decoder_output
+    def forward(self, X, enc_output, lookahead_mask, key_padding_mask):
+        """
+        Args:
+            X: [batch_size, tgt_seq_length] (target token indices)
+            enc_output: [memory_seq_length, batch_size, embedding_dim] (encoder outputs)
+            lookahead_mask: [tgt_seq_length, tgt_seq_length] (causal mask)
+            key_padding_mask: [batch_size, tgt_seq_length] (padding mask for target)
+        Returns:
+            Output tensor: [batch_size, tgt_seq_length, embedding_dim]
+        """
+        # Embedding
+        X = self.embedding(X)  # [batch_size, tgt_seq_length, embedding_dim]
+        X = X * math.sqrt(self.embedding_dim)
+        X = self.positional_encoding(X)  # [batch_size, tgt_seq_length, embedding_dim]
+        X = self.dropout(X)
+        X = X.permute(1, 0, 2)  # [tgt_seq_length, batch_size, embedding_dim]
+        output = self.transformer_decoder(
+            tgt=X,
+            memory=enc_output,
+            tgt_mask=lookahead_mask,
+            memory_mask=None,
+            tgt_key_padding_mask=key_padding_mask,
+            memory_key_padding_mask=None,  # Assuming no padding in encoder outputs
+        )
+        output = output.permute(1, 0, 2)  # [batch_size, tgt_seq_length, embedding_dim]
+        return output
 
-#         def __len__(self):
-#             return self.encoder_input.shape[0]
+    def copy_weights(self, custom_decoder):
+        with torch.no_grad():
+            for i in range(DECODER_LAYER_NUM):
+                torch_layer = self.transformer_decoder.layers[i]
+                custom_layer = custom_decoder.dec_layers[i]
+                copy_decoder_layer_weights(torch_layer, custom_layer)
 
-#         def __getitem__(self, idx):
-#             return self.encoder_input[idx], self.decoder_input[idx], self.decoder_output[idx]
+            self.embedding.weight.data.copy_(
+                custom_decoder.embedding_converter.weight.data.clone()
+            )
+            self.positional_encoding.positional_embedding.copy_(
+                custom_decoder.positional_encoder.positional_embedding
+            )
+
+
+def test_decoder(input_tokens, input_tensor, attn_mask, key_padding_mask):
+    custom_decoder = Decoder(
+        embedding_dim=EMBEDDING_DIM,
+        num_heads=NUM_HEADS,
+        target_vocab_dim=OUTPUT_TOKEN_SIZE,
+        decoder_layer_num=DECODER_LAYER_NUM,  # Number of decoder layers
+        max_sentence_length=MAX_SENTENCE_LENGTH,
+        dropout_rate=DROPOUT_RATE,
+    )
+    torch_decoder = PyTorchDecoder(
+        embedding_dim=EMBEDDING_DIM,
+        num_heads=NUM_HEADS,
+        target_vocab_dim=OUTPUT_TOKEN_SIZE,
+        decoder_layer_num=DECODER_LAYER_NUM,  # Number of decoder layers
+        max_sentence_length=MAX_SENTENCE_LENGTH,
+        dropout_rate=DROPOUT_RATE,
+        dim_feedforward=EMBEDDING_DIM,
+    )
+
+    torch_decoder.copy_weights(custom_decoder=custom_decoder)
+    custom_decoder.eval()
+    torch_decoder.eval()
+    with torch.no_grad():
+        target_sequence = input_tokens
+        enc_out = input_tensor.clone()
+        torch_out = torch_decoder(
+            X=target_sequence,
+            enc_output=enc_out,
+            lookahead_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+        )
+        custom_out = custom_decoder(
+            X=target_sequence,
+            enc_output=enc_out,
+            lookahead_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+        )
+        torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
+
+
+##################################################################################################
+## Transformer Test
+##################################################################################################
+
+
+class PyTorchTransformer(torch.nn.Module):
+    def __init__(
+        self,
+        embedding_dim,
+        input_vocab_dim,
+        target_vocab_dim,
+        num_layers,
+        num_heads,
+        max_sentence_length,
+        dropout_rate=0.1,
+        dim_feedforward=2048,
+    ):
+        super(PyTorchTransformer, self).__init__()
+
+        # Embedding layers
+        self.encoder_embedding = torch.nn.Embedding(
+            num_embeddings=input_vocab_dim, embedding_dim=embedding_dim
+        )
+        self.decoder_embedding = torch.nn.Embedding(
+            num_embeddings=target_vocab_dim, embedding_dim=embedding_dim
+        )
+        # Positional encodings
+        self.encoder_positional_encoding = OGPositionalEncoder(
+            max_sentence_length, embedding_dim
+        )
+        self.decoder_positional_encoding = OGPositionalEncoder(
+            max_sentence_length, embedding_dim
+        )
+
+        # Dropout
+        self.encoder_dropout = torch.nn.Dropout(p=dropout_rate)
+        self.decoder_dropout = torch.nn.Dropout(p=dropout_rate)
+
+        self.transformer = torch.nn.Transformer(
+            d_model=embedding_dim,
+            nhead=num_heads,
+            num_encoder_layers=num_layers,
+            num_decoder_layers=num_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout_rate,
+            activation="relu",
+        )
+        # Final projection
+        self.final_dense = torch.nn.Linear(embedding_dim, target_vocab_dim, bias=False)
+        self.final_relu = torch.nn.ReLU()
+        self.final_softmax = torch.nn.Softmax(dim=-1)
+
+    def copy_transformer_weights(self, custom_model):
+        with torch.no_grad():
+            self.encoder_embedding.weight.data.copy_(
+                custom_model.encoder.embedding_converter.weight.data.clone()
+            )
+            self.encoder_positional_encoding.positional_embedding.copy_(
+                custom_model.encoder.positional_encoder.positional_embedding
+            )
+            for i in range(len(custom_model.encoder.encoder_layers)):
+                torch_enc_layer = self.transformer.encoder.layers[i]
+                custom_enc_layer = custom_model.encoder.encoder_layers[i]
+                copy_weights_multi_head_attn(
+                    torch_mha=torch_enc_layer.self_attn, my_mha=custom_enc_layer.mha
+                )
+                copy_weights_linear_layer(
+                    torch_layer=torch_enc_layer.linear1,
+                    my_layer=custom_enc_layer.ffn.dense1,
+                )
+                copy_weights_linear_layer(
+                    torch_layer=torch_enc_layer.linear2,
+                    my_layer=custom_enc_layer.ffn.dense2,
+                )
+                copy_weights_layer_norm(
+                    torch_layer=torch_enc_layer.norm1,
+                    my_layer=custom_enc_layer.layernorm1,
+                )
+                copy_weights_layer_norm(
+                    torch_layer=torch_enc_layer.norm2,
+                    my_layer=custom_enc_layer.layernorm2,
+                )
+            self.decoder_embedding.weight.data.copy_(
+                custom_model.decoder.embedding_converter.weight.data.clone()
+            )
+            self.decoder_positional_encoding.positional_embedding.copy_(
+                custom_model.decoder.positional_encoder.positional_embedding
+            )
+            for i in range(len(custom_model.decoder.dec_layers)):
+                torch_dec_layer = self.transformer.decoder.layers[i]
+                custom_dec_layer = custom_model.decoder.dec_layers[i]
+                copy_weights_multi_head_attn(
+                    torch_mha=torch_dec_layer.self_attn, my_mha=custom_dec_layer.mha1
+                )
+                copy_weights_multi_head_attn(
+                    torch_mha=torch_dec_layer.multihead_attn,
+                    my_mha=custom_dec_layer.mha2,
+                )
+                copy_weights_linear_layer(
+                    torch_layer=torch_dec_layer.linear1,
+                    my_layer=custom_dec_layer.ffn.dense1,
+                )
+                copy_weights_linear_layer(
+                    torch_layer=torch_dec_layer.linear2,
+                    my_layer=custom_dec_layer.ffn.dense2,
+                )
+                copy_weights_layer_norm(
+                    torch_layer=torch_dec_layer.norm1,
+                    my_layer=custom_dec_layer.layernorm1,
+                )
+                copy_weights_layer_norm(
+                    torch_layer=torch_dec_layer.norm2,
+                    my_layer=custom_dec_layer.layernorm2,
+                )
+
+            copy_weights_linear_layer(
+                torch_layer=self.final_dense, my_layer=custom_model.final_dense_layer
+            )
+
+    def forward(
+        self, src, tgt, src_key_padding_mask, tgt_key_padding_mask, tgt_mask=None
+    ):
+        # Embedding and positional encoding for encoder
+        src_emb = self.encoder_embedding(
+            src
+        )  # [batch_size, src_seq_len, embedding_dim]
+        src_emb = src_emb * math.sqrt(self.encoder_embedding.embedding_dim)
+
+        src_emb = self.encoder_positional_encoding(src_emb)
+        src_emb = self.encoder_dropout(src_emb)
+        src_emb = src_emb.permute(1, 0, 2)  # [src_seq_len, batch_size, embedding_dim]
+
+        # Embedding and positional encoding for decoder
+        tgt_emb = self.decoder_embedding(
+            tgt
+        )  # [batch_size, tgt_seq_len, embedding_dim]
+        tgt_emb = tgt_emb * math.sqrt(self.decoder_embedding.embedding_dim)
+        tgt_emb = self.decoder_positional_encoding(tgt_emb)
+        tgt_emb = self.decoder_dropout(tgt_emb)
+        tgt_emb = tgt_emb.permute(1, 0, 2)  # [tgt_seq_len, batch_size, embedding_dim]
+
+        # Transformer
+        dec_output = self.transformer(
+            src=src_emb,
+            tgt=tgt_emb,
+            tgt_mask=tgt_mask,
+            src_key_padding_mask=src_key_padding_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask,
+            memory_key_padding_mask=src_key_padding_mask,
+        )  # [tgt_seq_len, batch_size, embedding_dim]
+
+        # Final projection
+        dec_output = dec_output.permute(
+            1, 0, 2
+        )  # [batch_size, tgt_seq_len, embedding_dim]
+        logits = self.final_dense(
+            dec_output
+        )  # [batch_size, tgt_seq_len, target_vocab_dim]
+        logits = self.final_relu(logits)
+        logits = self.final_softmax(logits)
+        return logits
+
+
+def test_transformer_against_pytorch(
+    input_tokens, input_tensor, attn_mask, key_padding_mask
+):
+    # Instantiate PyTorch's Equivalent Transformer
+    torch_transformer = PyTorchTransformer(
+        embedding_dim=EMBEDDING_DIM,
+        input_vocab_dim=INPUT_TOKEN_SIZE,
+        target_vocab_dim=OUTPUT_TOKEN_SIZE,
+        num_layers=ENCODER_LAYER_NUM,
+        num_heads=NUM_HEADS,
+        max_sentence_length=MAX_SENTENCE_LENGTH,
+        dropout_rate=DROPOUT_RATE,
+        dim_feedforward=EMBEDDING_DIM,
+    )
+    # Instantiate Your Custom Transformer
+    custom_transformer = Transformer(
+        embedding_dim=EMBEDDING_DIM,
+        input_vocab_dim=INPUT_TOKEN_SIZE,
+        target_vocab_dim=OUTPUT_TOKEN_SIZE,
+        layer_num=ENCODER_LAYER_NUM,
+        num_heads=NUM_HEADS,
+        max_sentence_length=MAX_SENTENCE_LENGTH,
+        dropout_rate=DROPOUT_RATE,
+    )
+    torch_transformer.copy_transformer_weights(custom_model=custom_transformer)
+    torch_transformer.eval()
+    custom_transformer.eval()
+    # Forward Pass Through PyTorch's Transformer
+    with torch.no_grad():
+        torch_logits = torch_transformer(
+            src=input_tokens,  # [batch_size, src_seq_length]
+            tgt=input_tokens,  # [batch_size, tgt_seq_length]
+            src_key_padding_mask=key_padding_mask,
+            tgt_key_padding_mask=key_padding_mask,
+            tgt_mask=attn_mask,
+        )  # [batch_size, tgt_seq_length, target_vocab_dim]
+        custom_logits = custom_transformer(
+            input_sentences=input_tokens,  # [batch_size, src_seq_length]
+            output_sentences=input_tokens,  # [batch_size, tgt_seq_length]
+            enc_padding_mask=key_padding_mask,  # [batch_size, src_seq_length]
+            attn_mask=attn_mask,  # [tgt_seq_length, tgt_seq_length]
+            dec_padding_mask=key_padding_mask,  # [batch_size, tgt_seq_length]
+        )  # [batch_size, tgt_seq_length, target_vocab_dim]
+        # torch.allclose(torch_logits, custom_logits, atol=1e-6, rtol=1e-4)
