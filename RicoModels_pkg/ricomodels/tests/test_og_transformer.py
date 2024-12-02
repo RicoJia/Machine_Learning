@@ -96,7 +96,7 @@ def test_scaled_dot_product_basic(basic_config):
     # No masking
     mask = torch.zeros(batch_size, num_queries, num_keys)
     attention = DotProductAttention()
-    output = attention(q, k, v, mask)
+    output, attention_weight = attention(q, k, v, mask)
     assert output.shape == (batch_size, num_queries, v_dim), "Output shape mismatch."
 
 
@@ -113,7 +113,7 @@ def test_scaled_dot_product_effectiveness():
     mask = torch.tensor([[[0, 0, 1], [0, 0, 1]]])  # Shape: [1, num_queries, num_keys]
 
     attention = DotProductAttention()
-    output = attention(q, k, v, attn_mask=mask)
+    output, attn_weight = attention(q, k, v, attn_mask=mask)
     # Expected behavior:
     # For query 0: attends to key 0 and key 1
     # For query 1: attends to key 0 and key 1
@@ -189,7 +189,7 @@ def test_scaled_dot_product_comparative_analysis():
         key_padding_mask=key_padding_mask,
     )
     output_mha = output_mha.transpose(0, 1)  # [batch_size, num_queries, v_dim]
-    output_custom = attention(
+    output_custom, attn_weight = attention(
         q, k, v, attn_mask=attn_mask, key_padding_mask=key_padding_mask
     )
     # output_custom  = attention(q, k, v, attn_mask = mask)
@@ -224,7 +224,7 @@ def test_scaled_dot_product_gradient_flow():
     attention = DotProductAttention()
 
     # Forward pass
-    output = attention(q, k, v, attn_mask=mask)
+    output, _ = attention(q, k, v, attn_mask=mask)
 
     # Define a simple loss (sum of all outputs)
     loss = output.sum()
@@ -256,7 +256,7 @@ def test_scaled_dot_product_numerical_precision():
 
     mask = torch.zeros(batch_size, num_queries, num_keys)
     attention = DotProductAttention()
-    output = attention(q, k, v, attn_mask=mask)
+    output, _ = attention(q, k, v, attn_mask=mask)
     # Check for NaNs or Infs
     assert not torch.isnan(output).any(), "Output contains NaNs."
     assert not torch.isinf(output).any(), "Output contains Infs."
@@ -299,7 +299,7 @@ def test_multi_head_attention():
         embed_dim=qk_dim,
         num_heads=num_heads,
     )
-    output_custom = attention(
+    output_custom, _ = attention(
         q_mha, k_mha, v_mha, attn_mask=attn_mask, key_padding_mask=key_padding_mask
     )
     attention.eval()  # Disable dropout for testing
@@ -685,7 +685,11 @@ def test_decoder_layer(input_tensor, attn_mask, key_padding_mask):
             tgt_key_padding_mask=key_padding_mask,  # for masking key padding
             memory_key_padding_mask=key_padding_mask,
         )
-        custom_out = custom_decoder_layer(
+        (
+            custom_out,
+            decoder_self_attn_weight,
+            decoder_encoder_attn_weight,
+        ) = custom_decoder_layer(
             X=target_sequence,
             enc_output=enc_out,
             attn_mask=attn_mask,
@@ -800,7 +804,7 @@ def test_decoder(input_tokens, input_tensor, attn_mask, key_padding_mask):
         )
         # TODO: this is a small discrepancy with the torch implementation
         enc_out = input_tensor.clone().permute(1, 0, 2)
-        custom_out = custom_decoder(
+        custom_out, decoder_self_attns, decoder_encoder_attns = custom_decoder(
             X=target_sequence,
             enc_output=enc_out,
             lookahead_mask=attn_mask,
@@ -999,7 +1003,7 @@ def test_transformer_against_pytorch(
             tgt_key_padding_mask=key_padding_mask,
             tgt_mask=attn_mask,
         )  # [batch_size, tgt_seq_length, target_vocab_dim]
-        custom_logits = custom_transformer(
+        custom_logits, decoder_self_attns, decoder_encoder_attns = custom_transformer(
             input_sentences=input_tokens,  # [batch_size, src_seq_length]
             output_sentences=input_tokens,  # [batch_size, tgt_seq_length]
             enc_padding_mask=key_padding_mask,  # [batch_size, src_seq_length]

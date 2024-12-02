@@ -64,6 +64,7 @@ class DotProductAttention(torch.nn.Module):
             key_padding_mask (torch.Tensor): [batch_size, kv_num]. 1 means "mask out"
         Returns:
             attention: [batch_size, query_num, v_dim] or [batch_size, head_num, query_num, qk_dim]
+            attention_weight: [seq_length, head, embedding_dim]
         """
         q_kT_scaled = (q @ k.transpose(-2, -1)) / torch.sqrt(
             torch.tensor(k.shape[-1], dtype=torch.float32)
@@ -87,7 +88,7 @@ class DotProductAttention(torch.nn.Module):
         attention = attention_weight @ v
         # TODO In this implementation, there's a drop out
         # https://ricojia.github.io/2022/03/27/deep-learning-attention-mechanism/#scaled-dot-product-luong-attention
-        return attention
+        return attention, attention_weight
 
 
 class MultiHeadAttention(torch.nn.Module):
@@ -138,7 +139,7 @@ class MultiHeadAttention(torch.nn.Module):
         k = k.permute(1, 2, 0, 3)
         v = v.permute(1, 2, 0, 3)
         # [batch_size, head_num, query_num, head_embed_dim]
-        attention = self.attention(
+        attention, attention_weight = self.attention(
             q=q, k=k, v=v, attn_mask=attn_mask, key_padding_mask=key_padding_mask
         )
         # [query_num, batch_size, head_num, head_embed_dim]
@@ -147,7 +148,7 @@ class MultiHeadAttention(torch.nn.Module):
         ).contiguous()  # Any call before view() requires contiguous data
         attention = attention.view(num_queries, batch_size, self.embedding_dim)
         attention_output = self.out_proj(attention)
-        return attention_output
+        return attention_output, attention_weight
 
 
 class PositionwiseFFN(torch.nn.Module):
@@ -183,7 +184,7 @@ class EncoderLayer(torch.nn.Module):
 
     def forward(self, X, attn_mask, key_padding_mask):
         # Self attention (input_seq_len, batch_size, embedding_dim)
-        self_attn_output = self.mha(
+        self_attn_output, self_attn_weight = self.mha(
             X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask
         )
         # apply dropout layer to the self-attention output (~1 line)
@@ -288,7 +289,7 @@ class DecoderLayer(torch.nn.Module):
         Returns:
             decoder output:
         """
-        self_attn_output = self.mha1(
+        self_attn_output, decoder_self_attn_weight = self.mha1(
             X, X, X, attn_mask=attn_mask, key_padding_mask=None
         )
         # apply dropout layer to the self-attention output (~1 line)
@@ -300,7 +301,7 @@ class DecoderLayer(torch.nn.Module):
             X + self_attn_output
         )  # (output_seq_len, batch_size, embedding_dim)
 
-        self_attn_output = self.mha2(
+        self_attn_output, decoder_encoder_attn_weight = self.mha2(
             out1,
             enc_output,
             enc_output,
@@ -322,7 +323,7 @@ class DecoderLayer(torch.nn.Module):
         out3 = self.layernorm2(
             ffn_output + out2
         )  # (output_seq_len, batch_size, embedding_dim)
-        return out3
+        return out3, decoder_self_attn_weight, decoder_encoder_attn_weight
 
 
 class Decoder(torch.nn.Module):
@@ -372,15 +373,18 @@ class Decoder(torch.nn.Module):
         X = X.permute(1, 0, 2)  # [output_seq_len, batch_size, qk_dim]
         enc_output = enc_output.permute(1, 0, 2)
         # [num_keys, batch_size, qk_dim]
+        decoder_self_attns, decoder_encoder_attns = [], []
         for decoder_layer in self.dec_layers:
-            X = decoder_layer(
+            X, decoder_self_attn, decoder_encoder_attn = decoder_layer(
                 X,
                 enc_output,
                 attn_mask=lookahead_mask,
                 key_padding_mask=key_padding_mask,
             )
+            decoder_self_attns.append(decoder_self_attn)
+            decoder_encoder_attns.append(decoder_encoder_attn)
         X = X.permute(1, 0, 2)  # [batch_size, output_seq_len, qk_dim]
-        return X
+        return X, decoder_self_attns, decoder_encoder_attns
 
 
 class Transformer(torch.nn.Module):
@@ -434,7 +438,7 @@ class Transformer(torch.nn.Module):
         # [batch_size, input_seq_len, qk_dim]
         enc_output = self.encoder(X=input_sentences, enc_padding_mask=enc_padding_mask)
         # [batch_size, output_seq_len, qk_dim]
-        dec_output = self.decoder(
+        dec_output, decoder_self_attns, decoder_encoder_attns = self.decoder(
             X=output_sentences,
             enc_output=enc_output,
             lookahead_mask=attn_mask,
@@ -444,7 +448,7 @@ class Transformer(torch.nn.Module):
         # THIS IS ASSUMING THAT WE ARE USING CROSS_ENTROPY LOSS
         # [batch_size, output_seq_len,target_vocab_dim]
         logits = self.final_dense_layer(dec_output)
-        return logits
+        return logits, decoder_self_attns, decoder_encoder_attns
 
 
 def _plot_positional_encoder(
