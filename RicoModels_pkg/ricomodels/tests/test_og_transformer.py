@@ -1,6 +1,6 @@
 import pytest
 import torch
-from ricomodels.og_transformer.og_transformer_encoder import (
+from ricomodels.og_transformer.og_transformer import (
     DotProductAttention,
     Encoder,
     EncoderLayer,
@@ -8,7 +8,7 @@ from ricomodels.og_transformer.og_transformer_encoder import (
     OGPositionalEncoder,
 )
 from ricomodels.utils.predict_tools import allclose_replace_nan
-
+import math
 
 # TODO: this can be re-orged
 @pytest.fixture
@@ -24,9 +24,11 @@ def basic_config():
         "v_dim": 6,
     }
 
+torch.manual_seed(42)
 
 ##################################################################################################
-
+## Positional Encoder, Scaled-Dot Attention, Multi-Head Attention
+##################################################################################################
 
 def test_og_positional_encoder(basic_config):
     batch_size = basic_config["batch_size"]
@@ -237,6 +239,13 @@ def test_scaled_dot_product_numerical_precision():
     assert not torch.isnan(output).any(), "Output contains NaNs."
     assert not torch.isinf(output).any(), "Output contains Infs."
 
+def copy_weights_multi_head_attn(my_mha, torch_mha):
+    with torch.no_grad():
+        in_proj_weight = torch.cat(
+            [my_mha.Wq.weight, my_mha.Wk.weight, my_mha.Wv.weight], dim=0
+        )
+        torch_mha.in_proj_weight.copy_(in_proj_weight)
+        torch_mha.out_proj.weight.copy_(my_mha.out_proj.weight)
 
 def test_multi_head_attention():
     """
@@ -278,13 +287,8 @@ def test_multi_head_attention():
         add_zero_attn=False,
     )
     mha.eval()  # Disable dropout for testing
-    with torch.no_grad():
-        # Concatenate weights for in_proj_weight
-        in_proj_weight = torch.cat(
-            [attention.Wq.weight, attention.Wk.weight, attention.Wv.weight], dim=0
-        )
-        mha.in_proj_weight.copy_(in_proj_weight)
-        mha.out_proj.weight.copy_(attention.out_proj.weight)
+    # Concatenate weights for in_proj_weight
+    copy_weights_multi_head_attn(my_mha=attention, torch_mha=mha)
     output_mha, _ = mha(
         q_mha,
         k_mha,
@@ -302,15 +306,19 @@ def test_multi_head_attention():
 
 
 ##################################################################################################
+## Encoder Layer Tests
+##################################################################################################
+
 BATCH_SIZE = 16
-NUM_KEYS = 4
-NUM_QUERIES = 4
+# TODO: NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
+NUM_KEYS = 50
+NUM_QUERIES = 50
 EMBEDDING_DIM = 16
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 INPUT_TOKEN_SIZE = 100
 MAX_SENTENCE_LENGTH = 50
-
+ENCODER_LAYER_NUM = 2
 
 @pytest.fixture
 def key_padding_mask():
@@ -434,7 +442,50 @@ def test_parameter_variations(
         output.shape == input_tensor.shape
     ), f"Mismatch in output shape for embedding_dim={embedding_dim}, num_heads={num_heads}, dropout_rate={dropout_rate}"
 
+def copy_weights_linear_layer(my_layer, torch_layer):
+    torch_layer.weight.copy_(my_layer.weight)
+    torch_layer.bias.copy_(my_layer.bias)
 
+def copy_weights_layer_norm(my_layer, torch_layer):
+    my_layer.weight = torch_layer.weight
+    my_layer.bias = torch_layer.bias
+
+def copy_weights_encoder_layer(torch_encoder_layer, my_encoder_layer):
+    # Copy self-attention weights
+    copy_weights_multi_head_attn(my_mha=my_encoder_layer.mha, torch_mha=torch_encoder_layer.self_attn)
+    # # Copy feed-forward network weights
+    with torch.no_grad():
+        copy_weights_linear_layer(my_layer= my_encoder_layer.ffn.dense1, torch_layer=torch_encoder_layer.linear1)
+        copy_weights_linear_layer(my_layer= my_encoder_layer.ffn.dense2, torch_layer=torch_encoder_layer.linear2)
+        copy_weights_layer_norm(my_layer=my_encoder_layer.layernorm1, torch_layer=torch_encoder_layer.norm1)
+        copy_weights_layer_norm(my_layer=my_encoder_layer.layernorm2, torch_layer=torch_encoder_layer.norm2)
+
+def test_encoder_layer(input_tensor, attn_mask, key_padding_mask):
+    encoder_layer = EncoderLayer(
+        embedding_dim=EMBEDDING_DIM, num_heads=NUM_HEADS, dropout_rate=DROPOUT_RATE
+    )
+    built_in_encoder_layer = torch.nn.TransformerEncoderLayer(d_model=EMBEDDING_DIM, nhead=NUM_HEADS,
+                                                    dim_feedforward=EMBEDDING_DIM,
+                                                    dropout=DROPOUT_RATE)
+    copy_weights_encoder_layer(built_in_encoder_layer, encoder_layer)
+    
+    encoder_layer.eval()
+    built_in_encoder_layer.eval()
+    with torch.no_grad():
+        my_out = encoder_layer(
+            X=input_tensor,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask
+        )
+        torch_out = built_in_encoder_layer(
+            src=input_tensor,
+            src_mask=attn_mask,
+            src_key_padding_mask=key_padding_mask
+        )
+    torch.allclose(torch_out, my_out, atol=1e-6, rtol=1e-4)
+
+##################################################################################################
+## Encoder Tests
 ##################################################################################################
 
 
@@ -448,7 +499,6 @@ def input_tokens():
         dtype=torch.long,
     )
 
-
 @pytest.fixture
 def full_encoder():
     """Fixture to create an EncoderLayer instance."""
@@ -461,25 +511,89 @@ def full_encoder():
         dropout_rate=DROPOUT_RATE,
     )
 
+class TestableTorchEncoder(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.built_in_encoder_layer = torch.nn.TransformerEncoderLayer(d_model=EMBEDDING_DIM, nhead=NUM_HEADS,
+                                                        dim_feedforward=EMBEDDING_DIM,
+                                                        dropout=DROPOUT_RATE)
+        self.torch_embedding = torch.nn.Embedding(num_embeddings=INPUT_TOKEN_SIZE, embedding_dim=EMBEDDING_DIM)
+        self.torch_positional_encoding = OGPositionalEncoder(
+                        max_sentence_length=MAX_SENTENCE_LENGTH, embedding_size=EMBEDDING_DIM)
+        self.torch_encoder = torch.nn.TransformerEncoder(
+            encoder_layer=self.built_in_encoder_layer,
+            num_layers=ENCODER_LAYER_NUM
+        )
+        self.torch_dropout = torch.nn.Dropout(p=DROPOUT_RATE)
+
+    def copy_weights(self, custom_encoder):
+        self.torch_embedding.weight.data.copy_(custom_encoder.embedding_converter.weight.data.clone())
+        self.torch_positional_encoding.positional_embedding.copy_(custom_encoder.positional_encoder.positional_embedding)
+        for i in range(ENCODER_LAYER_NUM):
+            torch_layer = self.torch_encoder.layers[i]
+            custom_layer = custom_encoder.encoder_layers[i]
+            copy_weights_encoder_layer(my_encoder_layer=custom_layer, torch_encoder_layer=torch_layer)
+
+    def forward(self, X, key_padding_mask):
+        torch_X = self.torch_embedding(X) * math.sqrt(EMBEDDING_DIM)
+        torch_X = self.torch_positional_encoding(torch_X)
+        torch_X = self.torch_dropout(torch_X)
+        torch_X = torch_X.permute(1, 0, 2)  # (seq_length, batch_size, embedding_dim)
+        torch_out = self.torch_encoder(
+            src=torch_X,
+            mask=None,
+            src_key_padding_mask=key_padding_mask
+        )
+        torch_out = torch_out.permute(1, 0, 2)  # [batch_size, input_seq_len, qk_dim]
+        return torch_out
+
+# def initialize_encoders(torch_encoder, my_encoder):
+#     for built_in_layer, my_layer in zip(torch_encoder.layers, my_encoder.layers):
+#         my_layer.ffn.dense1.load_state_dict(built_in_layer.linear1.state_dict())
+#         my_layer.ffn.dense2.load_state_dict(built_in_layer.linear2.state_dict())
+#         my_layer.mha.load_state_dict(built_in_layer.self_attn.state_dict())
+        
+#         # Copy layer normalization weights
+#         my_layer.layernorm1.load_state_dict(built_in_layer.norm1.state_dict())
+#         my_layer.layernorm2.load_state_dict(built_in_layer.norm2.state_dict()) 
+
+def copy_encoder_weights(custom_encoder, torch_encoder):
+    torch_encoder.embedding_converter.weight.data.copy_(custom_encoder.embedding_converter.weight.data.clone())
 
 def test_encoder_output_shape(full_encoder, input_tokens):
     """Test if the output shape matches the input shape."""
-    output = full_encoder(input_tokens)
-    # TODO Remember to remove
-    print(f"Rico: {output.shape}")
+    output = full_encoder(input_tokens, enc_padding_mask=None)
     expected_shape = (BATCH_SIZE, MAX_SENTENCE_LENGTH, EMBEDDING_DIM)
     assert (
         output.shape == expected_shape
     ), f"Expected output shape {expected_shape}, got {output.shape}"
 
+    
+def test_encoder(input_tensor, attn_mask, key_padding_mask):
+    custom_encoder = Encoder(
+        embedding_dim=EMBEDDING_DIM,
+        input_vocab_dim=INPUT_TOKEN_SIZE,
+        encoder_layer_num=ENCODER_LAYER_NUM,
+        num_heads=NUM_HEADS,
+        max_sentence_length=MAX_SENTENCE_LENGTH,
+        dropout_rate=DROPOUT_RATE
+    )
+    torch_encoder = TestableTorchEncoder()
+    with torch.no_grad():
+        torch_encoder.copy_weights(custom_encoder=custom_encoder)
 
-# def test_encoder():
-#     encoder = torch.nn.TransformerEncoderLayer(
-#             d_model=embedding_dim,
-#             nhead=num_heads,
-#             dim_feedforward=ff_dim,
-#             batch_first=True
-#         )
+    torch_encoder.eval()
+    custom_encoder.eval()
+
+    X = torch.randint(0, INPUT_TOKEN_SIZE, (BATCH_SIZE, MAX_SENTENCE_LENGTH))  # Random input indices
+
+    with torch.no_grad():
+        torch_out = torch_encoder(X, key_padding_mask)
+        custom_out = custom_encoder(
+            X=X,
+            enc_padding_mask=key_padding_mask
+        )
+        torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
 # def full_transformer_test():
 #     """Fixture to create a random input tensor."""
 #     sentences = [
