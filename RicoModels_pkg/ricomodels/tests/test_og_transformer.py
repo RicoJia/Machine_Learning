@@ -510,7 +510,7 @@ def test_encoder_layer(input_tensor, attn_mask, key_padding_mask):
         torch_out = built_in_encoder_layer(
             src=input_tensor, src_mask=attn_mask, src_key_padding_mask=key_padding_mask
         )
-    torch.allclose(torch_out, my_out, atol=1e-6, rtol=1e-4)
+    assert torch.allclose(torch_out, my_out, atol=1e-6, rtol=1e-4)
 
 
 ##################################################################################################
@@ -620,7 +620,7 @@ def test_encoder(input_tensor, attn_mask, key_padding_mask):
     with torch.no_grad():
         torch_out = torch_encoder(X, key_padding_mask)
         custom_out = custom_encoder(X=X, enc_padding_mask=key_padding_mask)
-        torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
+    assert torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
 
 
 ##################################################################################################
@@ -695,7 +695,7 @@ def test_decoder_layer(input_tensor, attn_mask, key_padding_mask):
             attn_mask=attn_mask,
             key_padding_mask=key_padding_mask,
         )
-        torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
+    assert torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
 
 
 class PyTorchDecoder(torch.nn.Module):
@@ -810,7 +810,7 @@ def test_decoder(input_tokens, input_tensor, attn_mask, key_padding_mask):
             lookahead_mask=attn_mask,
             key_padding_mask=key_padding_mask,
         )
-        torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
+    assert torch.allclose(torch_out, custom_out, atol=1e-6, rtol=1e-4)
 
 
 ##################################################################################################
@@ -962,8 +962,8 @@ class PyTorchTransformer(torch.nn.Module):
         logits = self.final_dense(
             dec_output
         )  # [batch_size, tgt_seq_len, target_vocab_dim]
-        logits = self.final_relu(logits)
-        logits = self.final_softmax(logits)
+        # logits = self.final_relu(logits)
+        # logits = self.final_softmax(logits)
         return logits
 
 
@@ -1010,4 +1010,4 @@ def test_transformer_against_pytorch(
             attn_mask=attn_mask,  # [tgt_seq_length, tgt_seq_length]
             dec_padding_mask=key_padding_mask,  # [batch_size, tgt_seq_length]
         )  # [batch_size, tgt_seq_length, target_vocab_dim]
-        torch.allclose(torch_logits, custom_logits, atol=1e-6, rtol=1e-4)
+    assert torch.allclose(torch_logits, custom_logits, atol=1e-6, rtol=1e-4)

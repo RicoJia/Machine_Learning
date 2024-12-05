@@ -13,11 +13,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader, RandomSampler, TensorDataset
+from ricomodels.utils.data_loading import get_package_dir
+import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 SOS_token = 0
 EOS_token = 1
+PAD_token = 2
 MAX_LENGTH = 30
 
 
@@ -44,9 +47,9 @@ def readLangs(lang1, lang2, reverse=False):
     print("Reading lines...")
 
     # Read the file and split into lines
-    lines = (
-        open("%s-%s.txt" % (lang1, lang2), encoding="utf-8").read().strip().split("\n")
-    )
+    package_dir = get_package_dir()
+    data_file_path = os.path.join(package_dir, f"seq2seq/{lang1}-{lang2}.txt")
+    lines = open(data_file_path, encoding="utf-8").read().strip().split("\n")
 
     # Split every line into pairs and normalize
     pairs = [[normalizeString(s) for s in l.split("\t") if s] for l in lines]
@@ -80,8 +83,11 @@ eng_prefixes = (
 
 
 def filterPair(p):
-    return len(p[0].split(" ")) < MAX_LENGTH and len(p[1].split(" ")) < MAX_LENGTH
-    # p[1].startswith(eng_prefixes)
+    return (
+        len(p[0].split(" ")) < MAX_LENGTH
+        and len(p[1].split(" ")) < MAX_LENGTH
+        and p[1].startswith(eng_prefixes)
+    )
 
 
 def filterPairs(pairs):
@@ -98,8 +104,8 @@ class Lang:
         self.name = name
         self.word2index = {}
         self.word2count = {}
-        self.index2word = {0: "SOS", 1: "EOS"}
-        self.n_words = 2  # Count SOS and EOS
+        self.index2word = {0: "SOS", 1: "EOS", 2: "PAD"}
+        self.n_words = 3  # Count SOS, EOS, PAD
 
     def addSentence(self, sentence):
         for word in sentence.split(" "):
@@ -116,6 +122,7 @@ class Lang:
 
 
 def prepareData(lang1, lang2, reverse=False):
+    """Return input and output sentences in lists, also, update tokens based on the number of words"""
     input_lang, output_lang, pairs = readLangs(lang1, lang2, reverse)
     print("Read %s sentence pairs" % len(pairs))
     pairs = filterPairs(pairs)
@@ -131,27 +138,33 @@ def prepareData(lang1, lang2, reverse=False):
 
 
 def indexesFromSentence(lang, sentence):
-    return [lang.word2index[word] for word in sentence.split(" ")]
+    return [SOS_token] + [lang.word2index[word] for word in sentence.split(" ")]
 
 
-def tensorFromSentence(lang, sentence):
-    indexes = indexesFromSentence(lang, sentence)
-    indexes.append(EOS_token)
-    return torch.tensor(indexes, dtype=torch.long, device=device).view(1, -1)
+# def tensorFromSentence(lang, sentence):
+#     indexes = indexesFromSentence(lang, sentence)
+#     indexes.append(EOS_token)
+#     return torch.tensor(indexes, dtype=torch.long, device=device).view(1, -1)
 
 
-def tensorsFromPair(pair):
-    input_tensor = tensorFromSentence(input_lang, pair[0])
-    target_tensor = tensorFromSentence(output_lang, pair[1])
-    return (input_tensor, target_tensor)
+# def tensorsFromPair(pair):
+#     input_tensor = tensorFromSentence(input_lang, pair[0])
+#     target_tensor = tensorFromSentence(output_lang, pair[1])
+#     return (input_tensor, target_tensor)
 
 
 def get_dataloader(batch_size):
+    """Generate sequences with tokens
+
+    Each sequence is [<SOS>, <token1>...<EOS>, <PAD>, <PAD>... ]
+    (MAX_SENTENCE_LENGTH)
+
+    """
     input_lang, output_lang, pairs = prepareData("spa", "eng", True)
 
     n = len(pairs)
-    input_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
-    target_ids = np.zeros((n, MAX_LENGTH), dtype=np.int32)
+    input_ids = PAD_token * np.ones((n, MAX_LENGTH), dtype=np.int32)
+    target_ids = PAD_token * np.ones((n, MAX_LENGTH), dtype=np.int32)
 
     for idx, (inp, tgt) in enumerate(pairs):
         inp_ids = indexesFromSentence(input_lang, inp)
@@ -160,6 +173,13 @@ def get_dataloader(batch_size):
         tgt_ids.append(EOS_token)
         input_ids[idx, : len(inp_ids)] = inp_ids
         target_ids[idx, : len(tgt_ids)] = tgt_ids
+
+    for i in range(10):
+        print(f"input:{pairs[i]}")
+    # TODO Remember to remove
+    print(f"Rico: example token: {input_ids[0]}")
+    # TODO Remember to remove
+    print(f"Data length is {len(pairs)}")
 
     train_data = TensorDataset(
         torch.LongTensor(input_ids).to(device), torch.LongTensor(target_ids).to(device)
@@ -170,6 +190,18 @@ def get_dataloader(batch_size):
         train_data, sampler=train_sampler, batch_size=batch_size
     )
     return input_lang, output_lang, train_dataloader, pairs
+
+
+def input_lang_sentence_to_tokens(src_sentence, input_lang):
+    src_tokens = (
+        [SOS_token]
+        + [
+            input_lang.word2index[normalizeString(word)]
+            for word in src_sentence.split(" ")
+        ]
+        + [EOS_token]
+    )
+    return src_tokens
 
 
 if __name__ == "__main__":

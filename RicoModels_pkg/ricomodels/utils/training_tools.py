@@ -48,6 +48,39 @@ def validate_model(model, val_loader, device, criterion):
     return val_loss
 
 
+def load_model_and_optimizer(model, optimizer, path, device):
+    # TODO Remember to remove
+    print(f"Rico: model_paht: {path}")
+    if os.path.exists(path):
+        checkpoint = torch.load(path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        epoch = checkpoint["epoch"]
+        print(f"Model loaded from {path}, last trained epoch: {epoch}")
+
+        # Move optimizer state to the correct device
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(device)
+        return model, optimizer, epoch
+    else:
+        print("Model is fresh-initialized.")
+        return model, optimizer, 0
+
+
+def save_model_and_optimizer(model, optimizer, epoch, path):
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+        },
+        path,
+    )
+    print(f"Model saved to {path}")
+
+
 def load_model(model_path, model, device):
     if os.path.exists(model_path):
         model.load_state_dict(
