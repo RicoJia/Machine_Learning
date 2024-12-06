@@ -10,10 +10,7 @@ import torch
 from ricomodels.utils.data_loading import TaskMode
 from ricomodels.utils.losses import (
     AccuracyCounter,
-    DiceLoss,
     F1ScoreCounter,
-    dice_loss,
-    focal_loss,
 )
 from ricomodels.utils.visualization import (
     get_total_weight_norm,
@@ -50,7 +47,7 @@ def validate_model(model, val_loader, device, criterion):
 
 def load_model_and_optimizer(model, optimizer, path, device):
     # TODO Remember to remove
-    print(f"Rico: model_paht: {path}")
+    print(f"Rico: model_path: {path}")
     if os.path.exists(path):
         checkpoint = torch.load(path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -154,59 +151,63 @@ def _eval_model(
         performance_counter = AccuracyCounter(device=device)
 
     device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    i = 0
     # TODO I AM ITERATING OVER TRAIN_LOADER, SO I'M MORE SURE
-    with tqdm(total=num_images, desc=f"{msg}", unit="batch") as pbar:
-        for inputs_test, labels_test in test_dataloader:
-            inputs_test = inputs_test.to(device)
-            labels_test = labels_test.to(device)
-            with torch.autocast(device_type=device_type, dtype=torch.float16):
-                outputs_test = model(inputs_test)
+    with torch.autograd.set_grad_enabled(True):
+        with tqdm(total=num_images, desc=f"{msg}", unit="batch") as pbar:
+            for inputs_test, labels_test in test_dataloader:
+                inputs_test = inputs_test.to(device)
+                labels_test = labels_test.to(device)
+                with torch.autocast(device_type=device_type, dtype=torch.float16):
+                    outputs_test = model(inputs_test)
 
-            if task_mode == TaskMode.IMAGE_SEGMENTATION:
-                _, predicted_test = outputs_test.max(1)
-                performance_counter.update(
-                    epoch_correct=(predicted_test == labels_test).sum(),
-                    epoch_total=labels_test.numel(),
-                )
-            elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
-                # [1, 1, 0...]
-                predicted_test = (outputs_test > multiclass_thre).bool()
-                performance_counter.update(
-                    true_positives=(predicted_test & labels_test.bool()).sum(),
-                    actual_positives=torch.count_nonzero(labels_test),
-                    pred_positives=torch.count_nonzero(predicted_test),
-                )
-            else:
-                raise RuntimeError(
-                    f"Evaluation for task mode {task_mode} has NOT been implemented yet"
-                )
-
-            # labels_test: (m, h, w)
-            if visualize:
                 if task_mode == TaskMode.IMAGE_SEGMENTATION:
-                    for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
-                        visualize_image_target_mask(
-                            image=img.cpu(), target=pred.cpu(), labels=lab.cpu()
-                        )
+                    _, predicted_test = outputs_test.max(1)
+                    performance_counter.update(
+                        epoch_correct=(predicted_test == labels_test).sum(),
+                        epoch_total=labels_test.numel(),
+                    )
                 elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
-                    for img, pred, lab in zip(inputs_test, predicted_test, labels_test):
-                        visualize_image_class_names(
-                            image=img.cpu(),
-                            pred_cat_ids=pred,
-                            ground_truth_cat_ids=lab,
-                            class_names=class_names,
-                        )
+                    # [1, 1, 0...]
+                    predicted_test = (outputs_test > multiclass_thre).bool()
+                    performance_counter.update(
+                        true_positives=(predicted_test & labels_test.bool()).sum(),
+                        actual_positives=torch.count_nonzero(labels_test),
+                        pred_positives=torch.count_nonzero(predicted_test),
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Evaluation for task mode {task_mode} has NOT been implemented yet"
+                    )
 
-            # 100 is to make the prob close to 1 after softmax
-            pbar.update(1)
+                # labels_test: (m, h, w)
+                if visualize:
+                    if task_mode == TaskMode.IMAGE_SEGMENTATION:
+                        for img, pred, lab in zip(
+                            inputs_test, predicted_test, labels_test
+                        ):
+                            visualize_image_target_mask(
+                                image=img.cpu(), target=pred.cpu(), labels=lab.cpu()
+                            )
+                    elif task_mode == TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION:
+                        for img, pred, lab in zip(
+                            inputs_test, predicted_test, labels_test
+                        ):
+                            visualize_image_class_names(
+                                image=img.cpu(),
+                                pred_cat_ids=pred,
+                                ground_truth_cat_ids=lab,
+                                class_names=class_names,
+                            )
 
-    logging.info(
-        f"""{msg}
-            Total weight norm: {get_total_weight_norm(model)}
-        """
-    )
-    performance_counter.print_result()
+                # 100 is to make the prob close to 1 after softmax
+                pbar.update(1)
+
+        logging.info(
+            f"""{msg}
+                Total weight norm: {get_total_weight_norm(model)}
+            """
+        )
+        performance_counter.print_result()
 
 
 def eval_model(

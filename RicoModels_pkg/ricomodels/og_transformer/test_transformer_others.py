@@ -1,3 +1,7 @@
+# References:
+# - https://towardsdatascience.com/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
+# - Another example: https://iiosnail.blogspot.com/2024/10/nn-transfomer.html
+# - https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -20,6 +24,19 @@ from ricomodels.og_transformer.translator_transformer import (
 import os
 import math
 import numpy as np
+
+BATCH_SIZE = 16
+EMBEDDING_DIM = 64
+NUM_HEADS = 8
+DROPOUT_RATE = 0.1
+MAX_SENTENCE_LENGTH = MAX_LENGTH
+ENCODER_LAYER_NUM = 3
+DECODER_LAYER_NUM = 3
+NUM_EPOCHS = 800
+GRADIENT_CLIPPED_NORM_MAX = 5.0
+input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
+INPUT_TOKEN_SIZE = input_lang.n_words
+OUTPUT_TOKEN_SIZE = output_lang.n_words
 
 
 class PositionalEncoding(nn.Module):
@@ -57,39 +74,181 @@ class PositionalEncoding(nn.Module):
         )
 
 
-@torch.inference_mode()
-def greedy_decode(model, src, src_key_padding_mask, max_len, start_symbol):
+class Transformer(nn.Module):
+    """
+    Model from "A detailed guide to Pytorch's nn.Transformer() module.", by
+    Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
+    """
 
-    for i in range(max_len):
-        # Embed the current target sequence
-        tgt_emb = model.decoder_embedding(ys)  # Shape: (1, tgt_seq_len, embedding_dim)
-        tgt_emb = tgt_emb * math.sqrt(model.decoder_embedding.embedding_dim)
-        tgt_emb = model.decoder_positional_encoding(tgt_emb)
-        tgt_emb = model.decoder_dropout(tgt_emb)
-        tgt_emb = tgt_emb.permute(1, 0, 2)  # Shape: (tgt_seq_len, 1, embedding_dim)
-        tgt_mask = model.transformer.generate_square_subsequent_mask(ys.size(1)).to(
-            device
-        )  # Shape: (tgt_seq_len, tgt_seq_len)
+    # Constructor
+    def __init__(
+        self,
+        num_tokens,
+        dim_model,
+        num_heads,
+        num_encoder_layers,
+        num_decoder_layers,
+        dropout_p,
+    ):
+        super().__init__()
 
-        # Decode the target sequence
-        out = model.transformer.decoder(
-            tgt=tgt_emb,
-            memory=memory,
+        self.model_type = "Transformer"
+        self.dim_model = dim_model
+        self.positional_encoder = PositionalEncoding(
+            dim_model=dim_model, dropout_p=dropout_p, max_len=MAX_SENTENCE_LENGTH
+        )
+        self.encoder_embedding = nn.Embedding(num_tokens, dim_model)
+        self.decoder_embedding = nn.Embedding(num_tokens, dim_model)
+        self.transformer = nn.Transformer(
+            d_model=dim_model,
+            nhead=num_heads,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            dropout=dropout_p,
+        )
+        self.out = nn.Linear(dim_model, num_tokens)
+        nn.init.xavier_uniform_(self.encoder_embedding.weight)
+        nn.init.xavier_uniform_(self.decoder_embedding.weight)
+
+    def forward(self, src, tgt, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
+        # Src size must be (batch_size, src sequence length)
+        # Tgt size must be (batch_size, tgt sequence length)
+
+        # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
+        src_1, tgt_1 = src, tgt
+        src = self.encoder_embedding(src) * math.sqrt(self.dim_model)
+        tgt = self.decoder_embedding(tgt) * math.sqrt(self.dim_model)
+        src_2, tgt_2 = src, tgt
+        src = self.positional_encoder(src)
+        tgt = self.positional_encoder(tgt)
+
+        # We could use the parameter batch_first=True, but our KDL version doesn't support it yet, so we permute
+        # to obtain size (sequence length, batch_size, dim_model),
+        src = src.permute(1, 0, 2)
+        tgt = tgt.permute(1, 0, 2)
+
+        # Transformer blocks - Out size = (sequence length, batch_size, num_tokens)
+        transformer_out = self.transformer(
+            src,
+            tgt,
             tgt_mask=tgt_mask,
-            # memory_key_padding_mask=src_key_padding_mask,  # Shape: (1, src_seq_len)
-            # tgt_key_padding_mask=None
-        )  # Shape: (tgt_seq_len, 1, embedding_dim)
-        out = out.permute(1, 0, 2)  # [batch_size, tgt_seq_len, embedding_dim]
-        out = model.final_dense(out)  # Shape: (tgt_seq_len, 1, vocab_size)
-        prob = out[-1, 0, :]  # Shape: (vocab_size)
-        _, next_word = torch.max(prob, dim=-1)
-        next_word = next_word.item()
-        ys = torch.cat(
-            [ys, torch.tensor([[next_word]], device=device)], dim=1
-        )  # Shape: (1, tgt_seq_len + 1)
-        if next_word == EOS_token:
-            break
-    return ys
+            src_key_padding_mask=src_pad_mask,
+            tgt_key_padding_mask=tgt_pad_mask,
+        )
+        out = self.out(transformer_out)
+
+        if torch.isnan(out).any():
+            print(f"NaN found in logits")
+        return out
+
+    def get_tgt_mask(self, size) -> torch.tensor:
+        # Generates a squeare matrix where the each row allows one word more to be seen
+        mask = torch.tril(torch.ones(size, size) == 1)  # Lower triangular matrix
+        mask = mask.float()
+        mask = mask.masked_fill(
+            mask == 0, -1e9
+        )  # Convert zeros to small value. Not using -inf
+        return mask
+
+    def create_pad_mask(self, matrix: torch.tensor, pad_token: int) -> torch.tensor:
+        # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
+        # [False, False, False, True, True, True]
+        return matrix == pad_token
+
+
+def generate_square_subsequent_mask(sz, device):
+    """
+    EX for size=5:
+    [[0., -inf, -inf, -inf, -inf],
+     [0.,   0., -inf, -inf, -inf],
+     [0.,   0.,   0., -inf, -inf],
+     [0.,   0.,   0.,   0., -inf],
+     [0.,   0.,   0.,   0.,   0.]]
+    """
+    mask = torch.triu(torch.ones(sz, sz, device=device) * -1e9, diagonal=1)
+    return mask
+
+
+def create_mask(src, tgt):
+    tgt_seq_len = tgt.size(1)
+    # 0 = unmask
+    tgt_mask = generate_square_subsequent_mask(tgt_seq_len, device=device)
+    src_padding_mask = src == PAD_token
+    tgt_padding_mask = tgt == PAD_token
+    return tgt_mask, src_padding_mask, tgt_padding_mask
+
+
+def train_epoch(model, optimizer, criterion, dataloader):
+    model.train()
+    total_loss = 0
+    scaler = torch.amp.GradScaler(device=device, enabled=True)
+    with torch.autograd.set_detect_anomaly(True):
+        for src_batch, tgt_batch in dataloader:
+            optimizer.zero_grad()  # is it before or after scaler?
+            tgt_batch = tgt_batch.to(device)
+            src_batch = src_batch.to(device)
+            tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
+                src_batch, tgt_batch
+            )
+            tgt_mask = tgt_mask.to(device=device)
+            src_padding_mask = src_padding_mask.to(device=device)
+            tgt_padding_mask = tgt_padding_mask.to(device=device)
+            with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
+                logits = model(
+                    src=src_batch,  # [30, 16], [max_length, batch size]
+                    tgt=tgt_batch,  # [29, 16]
+                    tgt_mask=tgt_mask,  # 99, 99
+                    src_pad_mask=src_padding_mask,
+                    tgt_pad_mask=tgt_padding_mask,
+                )
+                loss = criterion(
+                    logits.reshape(-1, logits.shape[-1]), tgt_batch.reshape(-1)
+                )
+
+            # calculate gradients
+            scaler.scale(loss).backward()
+            for name, param in model.named_parameters():
+                if torch.isinf(param.grad).any():
+                    print("inf: ", name)
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), max_norm=GRADIENT_CLIPPED_NORM_MAX
+                    )
+                    print(
+                        f"Applied gradient clipping to norm :{GRADIENT_CLIPPED_NORM_MAX}"
+                    )
+                if torch.isnan(param.grad).any():
+                    print("nan: ", name)
+            # unscale gradients (from float16 to float32)
+            scaler.step(optimizer)
+            # Adjusts the scaling factor for the next iteration. If gradients are too low, increase the scaling factor.
+            scaler.update()
+            # optimizer.step()  # this could be dangerous, because we are reapplying stale gradients?
+            total_loss += loss.detach().item()
+    return total_loss / len(dataloader)
+
+
+def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
+    """
+    Method from "A detailed guide to Pytorch's nn.Transformer() module.", by
+    Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
+    """
+
+    # Used for plotting later on
+    train_loss_list, validation_loss_list = [], []
+
+    print("Training and validating model")
+    for epoch in range(start_epoch, epochs):
+        print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
+
+        train_loss = train_epoch(model, opt, loss_fn, train_dataloader)
+        train_loss_list += [train_loss]
+
+        print(f"Training loss: {train_loss:.4f}")
+        print()
+        save_model_and_optimizer(model, opt, epoch=epoch, path=MODEL_PATH)
+
+    return train_loss_list, validation_loss_list
 
 
 @torch.inference_mode()
@@ -100,7 +259,6 @@ def translate(model, src_sentence, output_lang):
     src = torch.LongTensor([src_tokens]).to(device)
 
     ys = torch.tensor([[SOS_token]], dtype=torch.long, device=device)  # Shape: (1, 1)
-    src_mask = (src == 0).transpose(0, 1).to(device)
     for i in range(MAX_SENTENCE_LENGTH):
         tgt_mask = model.transformer.generate_square_subsequent_mask(ys.size(1)).to(
             device
@@ -133,184 +291,10 @@ def translate(model, src_sentence, output_lang):
     return translated_sentence
 
 
-class Transformer(nn.Module):
-    """
-    Model from "A detailed guide to Pytorch's nn.Transformer() module.", by
-    Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
-    """
-
-    # Constructor
-    def __init__(
-        self,
-        num_tokens,
-        dim_model,
-        num_heads,
-        num_encoder_layers,
-        num_decoder_layers,
-        dropout_p,
-    ):
-        super().__init__()
-
-        # INFO
-        self.model_type = "Transformer"
-        self.dim_model = dim_model
-
-        # LAYERS
-        self.positional_encoder = PositionalEncoding(
-            dim_model=dim_model, dropout_p=dropout_p, max_len=MAX_SENTENCE_LENGTH
-        )
-        self.embedding = nn.Embedding(num_tokens, dim_model)
-        self.transformer = nn.Transformer(
-            d_model=dim_model,
-            nhead=num_heads,
-            num_encoder_layers=num_encoder_layers,
-            num_decoder_layers=num_decoder_layers,
-            dropout=dropout_p,
-        )
-        self.out = nn.Linear(dim_model, num_tokens)
-
-    def forward(self, src, tgt, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
-        # Src size must be (batch_size, src sequence length)
-        # Tgt size must be (batch_size, tgt sequence length)
-
-        # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
-        src = self.embedding(src) * math.sqrt(self.dim_model)
-        tgt = self.embedding(tgt) * math.sqrt(self.dim_model)
-        src = self.positional_encoder(src)
-        tgt = self.positional_encoder(tgt)
-
-        # We could use the parameter batch_first=True, but our KDL version doesn't support it yet, so we permute
-        # to obtain size (sequence length, batch_size, dim_model),
-        src = src.permute(1, 0, 2)
-        tgt = tgt.permute(1, 0, 2)
-
-        # Transformer blocks - Out size = (sequence length, batch_size, num_tokens)
-        transformer_out = self.transformer(
-            src,
-            tgt,
-            tgt_mask=tgt_mask,
-            src_key_padding_mask=src_pad_mask,
-            tgt_key_padding_mask=tgt_pad_mask,
-        )
-        out = self.out(transformer_out)
-
-        return out
-
-    def get_tgt_mask(self, size) -> torch.tensor:
-        # Generates a squeare matrix where the each row allows one word more to be seen
-        mask = torch.tril(torch.ones(size, size) == 1)  # Lower triangular matrix
-        mask = mask.float()
-        mask = mask.masked_fill(mask == 0, float("-inf"))  # Convert zeros to -inf
-        mask = mask.masked_fill(mask == 1, float(0.0))  # Convert ones to 0
-
-        # EX for size=5:
-        # [[0., -inf, -inf, -inf, -inf],
-        #  [0.,   0., -inf, -inf, -inf],
-        #  [0.,   0.,   0., -inf, -inf],
-        #  [0.,   0.,   0.,   0., -inf],
-        #  [0.,   0.,   0.,   0.,   0.]]
-
-        return mask
-
-    def create_pad_mask(self, matrix: torch.tensor, pad_token: int) -> torch.tensor:
-        # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
-        # [False, False, False, True, True, True]
-        return matrix == pad_token
-
-
-def generate_square_subsequent_mask(sz, device):
-    mask = torch.triu(torch.ones(sz, sz, device=device) * float("-inf"), diagonal=1)
-    return mask
-
-
-def create_mask(src, tgt):
-    src_seq_len = src.size(1)
-    tgt_seq_len = tgt.size(1)
-
-    # 0 = unmask
-    src_mask = torch.zeros((src_seq_len, src_seq_len), device=src.device).type(
-        torch.bool
-    )
-    tgt_mask = generate_square_subsequent_mask(tgt_seq_len, device=device)
-
-    src_padding_mask = (src == 0).transpose(0, 1)
-    tgt_padding_mask = (tgt == 0).transpose(0, 1)
-    return src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
-
-
-def train_epoch(model, optimizer, criterion, dataloader):
-    model.train()
-    total_loss = 0
-    for src_batch, tgt_batch in dataloader:
-        tgt_batch = tgt_batch.to(device)
-        src_batch = src_batch.to(device)
-        src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
-            src_batch, tgt_batch
-        )
-        # src_batch = src_batch.transpose(0, 1)
-        src_mask = src_mask.to(device=device)
-        tgt_mask = tgt_mask.to(device=device)
-        src_padding_mask = src_padding_mask.to(device=device)
-        tgt_padding_mask = tgt_padding_mask.to(device=device)
-        logits = model(
-            src=src_batch,  # [30, 16], [max_length, batch size]
-            tgt=tgt_batch,  # [29, 16]
-            tgt_mask=tgt_mask,  # 99, 99
-            # src_key_padding_mask = src_padding_mask, #batch, max_length
-            # tgt_key_padding_mask = tgt_padding_mask, #batch, max_length-1 TODO
-        )
-        # tgt_out = tgt_batch[1:, :]
-        loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_batch.reshape(-1))
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.detach().item()
-    return total_loss / len(dataloader)
-
-
-def fit(model, opt, loss_fn, train_dataloader, val_dataloader, epochs, start_epoch):
-    """
-    Method from "A detailed guide to Pytorch's nn.Transformer() module.", by
-    Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
-    """
-
-    # Used for plotting later on
-    train_loss_list, validation_loss_list = [], []
-
-    print("Training and validating model")
-    for epoch in range(start_epoch, epochs):
-        print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
-
-        train_loss = train_epoch(model, opt, loss_fn, train_dataloader)
-        train_loss_list += [train_loss]
-
-        # validation_loss = validation_loop(model, loss_fn, val_dataloader)
-        # validation_loss_list += [validation_loss]
-
-        print(f"Training loss: {train_loss:.4f}")
-        # print(f"Validation loss: {validation_loss:.4f}")
-        print()
-        save_model_and_optimizer(model, opt, epoch=epoch, path=MODEL_PATH)
-
-    return train_loss_list, validation_loss_list
-
-
-BATCH_SIZE = 16
-# NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
-EMBEDDING_DIM = 64
-NUM_HEADS = 4
-DROPOUT_RATE = 0.1
-MAX_SENTENCE_LENGTH = MAX_LENGTH
-ENCODER_LAYER_NUM = 3
-DECODER_LAYER_NUM = 3
-NUM_EPOCHS = 80
-input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
-INPUT_TOKEN_SIZE = input_lang.n_words
-OUTPUT_TOKEN_SIZE = output_lang.n_words
-
 if __name__ == "__main__":
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch.autograd.set_detect_anomaly(args.debug)
     # input_vocab_dim, embedding_dim, num_heads
     model = Transformer(
         num_tokens=INPUT_TOKEN_SIZE,
@@ -320,8 +304,9 @@ if __name__ == "__main__":
         num_decoder_layers=DECODER_LAYER_NUM,
         dropout_p=0.1,
     ).to(device)
-    opt = torch.optim.SGD(model.parameters(), lr=0.01)
-    loss_fn = nn.CrossEntropyLoss()
+    # opt = torch.optim.SGD(model.parameters(), lr=0.01)
+    opt = optim.AdamW(model.parameters(), lr=1e-4)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=PAD_token)
     model, opt, start_epoch = load_model_and_optimizer(
         model,
         opt,
@@ -338,7 +323,6 @@ if __name__ == "__main__":
             opt,
             loss_fn,
             train_dataloader,
-            val_dataloader=None,
             epochs=NUM_EPOCHS,
             start_epoch=start_epoch,
         )

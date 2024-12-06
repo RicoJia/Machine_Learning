@@ -18,9 +18,9 @@ import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-SOS_token = 0
-EOS_token = 1
-PAD_token = 2
+SOS_token = 1
+EOS_token = 2
+PAD_token = 0
 MAX_LENGTH = 30
 
 
@@ -97,14 +97,16 @@ def filterPairs(pairs):
 class Lang:
     """
     Build a counter, and word <-> index lookups for every new word.
-    This will help set up one-hot vectors
+    This will help set up one-hot vectors. Key components are:
+    - word2index: each word has an index.
+    - word2count: counting words.
     """
 
     def __init__(self, name):
         self.name = name
         self.word2index = {}
         self.word2count = {}
-        self.index2word = {0: "SOS", 1: "EOS", 2: "PAD"}
+        self.index2word = {SOS_token: "SOS", EOS_token: "EOS", PAD_token: "PAD"}
         self.n_words = 3  # Count SOS, EOS, PAD
 
     def addSentence(self, sentence):
@@ -138,7 +140,11 @@ def prepareData(lang1, lang2, reverse=False):
 
 
 def indexesFromSentence(lang, sentence):
-    return [SOS_token] + [lang.word2index[word] for word in sentence.split(" ")]
+    return (
+        [SOS_token]
+        + [lang.word2index[word] for word in sentence.split(" ")]
+        + [EOS_token]
+    )
 
 
 # def tensorFromSentence(lang, sentence):
@@ -169,8 +175,6 @@ def get_dataloader(batch_size):
     for idx, (inp, tgt) in enumerate(pairs):
         inp_ids = indexesFromSentence(input_lang, inp)
         tgt_ids = indexesFromSentence(output_lang, tgt)
-        inp_ids.append(EOS_token)
-        tgt_ids.append(EOS_token)
         input_ids[idx, : len(inp_ids)] = inp_ids
         target_ids[idx, : len(tgt_ids)] = tgt_ids
 
