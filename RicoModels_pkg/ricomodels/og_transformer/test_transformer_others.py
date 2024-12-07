@@ -26,12 +26,12 @@ import math
 import numpy as np
 
 BATCH_SIZE = 16
-EMBEDDING_DIM = 64
+EMBEDDING_DIM = 16
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
-ENCODER_LAYER_NUM = 3
-DECODER_LAYER_NUM = 3
+ENCODER_LAYER_NUM = 1
+DECODER_LAYER_NUM = 1
 NUM_EPOCHS = 800
 GRADIENT_CLIPPED_NORM_MAX = 5.0
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
@@ -111,8 +111,20 @@ class Transformer(nn.Module):
         nn.init.xavier_uniform_(self.decoder_embedding.weight)
 
     def forward(self, src, tgt, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
-        # Src size must be (batch_size, src sequence length)
-        # Tgt size must be (batch_size, tgt sequence length)
+        """ Training Function of this Transformer wrapper
+
+        Args: 
+            src (_type_): (batch_size, src sequence length)
+            tgt (_type_): (batch_size, tgt sequence length)
+            tgt_mask (_type_, optional): (sequence length, sequence length)
+            src_pad_mask (_type_, optional): (batch_size, src sequence length)
+            tgt_pad_mask (_type_, optional): (batch_size, src sequence length)
+
+        Returns:
+            Logits: (batch_size, sequence length, num_tokens)
+        """
+        # Src size must be 
+        # Tgt size must be 
 
         # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
         src_1, tgt_1 = src, tgt
@@ -136,6 +148,8 @@ class Transformer(nn.Module):
             tgt_key_padding_mask=tgt_pad_mask,
         )
         out = self.out(transformer_out)
+        # (batch_size, sequence length, num_tokens)
+        out = out.permute(1, 0, 2)
 
         if torch.isnan(out).any():
             print(f"NaN found in logits")
@@ -202,7 +216,12 @@ def train_epoch(model, optimizer, criterion, dataloader):
                     tgt_pad_mask=tgt_padding_mask,
                 )
                 loss = criterion(
-                    logits.reshape(-1, logits.shape[-1]), tgt_batch.reshape(-1)
+                    logits.reshape(
+                        -1, logits.size(-1)
+                    ),  # (batch_size * sequence length, output_token_dim)
+                    tgt_batch.reshape(
+                        -1
+                    ),  # tgt_batch is (batch_size * sequence length)
                 )
 
             # calculate gradients
@@ -225,6 +244,8 @@ def train_epoch(model, optimizer, criterion, dataloader):
             scaler.update()
             # optimizer.step()  # this could be dangerous, because we are reapplying stale gradients?
             total_loss += loss.detach().item()
+            if args.debug:
+                training_logits_to_outuput_sentence(logits, tgt_batch, output_lang)
     return total_loss / len(dataloader)
 
 
@@ -251,6 +272,43 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
     return train_loss_list, validation_loss_list
 
 
+def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
+    """ Translate all logits generated during training
+
+    Args:
+        logits_batch (_type_): [batch_size, sentence_length, ouput_token_dim]
+        tgt_batch (_type_): [batch_size, sentence_length]
+        output_lang (_type_): output_language dictionary object
+    """
+    for logits, tgt in zip(logits_batch, tgt_batch):
+        # logits: [sentence_length, ouput_token_dim]
+        ys = torch.tensor([[SOS_token]], dtype=torch.long, device=device)
+        _, indices = torch.max(logits, dim=-1)  # next_word:
+        for i in range(MAX_SENTENCE_LENGTH):
+            # pred has all timesteps, so does next_word
+            next_word = indices[i].item()
+            ys = torch.cat(
+                [ys, torch.tensor([[next_word]], device=device)], dim=1
+            )  # Shape: (1, tgt_seq_len + 1)
+            # if next_word == EOS_token:
+            #     break
+        pred_tokens = ys.flatten()
+        translated_tokens = []
+        for token in pred_tokens:
+            token_idx = token.item()
+            word = output_lang.index2word.get(token_idx, "<unk>")
+            translated_tokens.append(word)
+        tgt_tokens = []
+        for token in tgt:
+            token_idx = token.item()
+            word = output_lang.index2word.get(token_idx, "<unk>")
+            tgt_tokens.append(word)
+        print(
+            f"Translated sentence during training: {translated_tokens}, target: {tgt_tokens}"
+        )
+
+
+# TODO: this might be broken, focus on training now
 @torch.inference_mode()
 def translate(model, src_sentence, output_lang):
     src_tokens = input_lang_sentence_to_tokens(
@@ -264,8 +322,12 @@ def translate(model, src_sentence, output_lang):
             device
         )  # Shape: (tgt_seq_len, tgt_seq_len)
         # Decode the target sequence
-        pred = model(src=src, tgt=ys, tgt_mask=tgt_mask)
-        _, next_word = torch.max(pred, dim=-1)
+        logits = model(
+            src=src,
+            tgt=ys,
+            # tgt_mask=tgt_mask
+        )
+        _, next_word = torch.max(logits, dim=-1)
         # pred has all timesteps, so does next_word
         next_word = next_word[-1].item()
         ys = torch.cat(
