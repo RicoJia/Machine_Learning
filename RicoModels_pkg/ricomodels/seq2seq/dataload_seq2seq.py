@@ -21,7 +21,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SOS_token = 1
 EOS_token = 2
 PAD_token = 0
-MAX_LENGTH = 30
+MAX_LENGTH = 100
 
 
 # Turn a Unicode string to plain ASCII, thanks to
@@ -83,9 +83,10 @@ eng_prefixes = (
 
 
 def filterPair(p):
+    # MAX_LENGTH-2 because we are considering <SOS> and <EOS>
     return (
-        len(p[0].split(" ")) < MAX_LENGTH
-        and len(p[1].split(" ")) < MAX_LENGTH
+        len(p[0].split(" ")) <= MAX_LENGTH - 2
+        and len(p[1].split(" ")) <= MAX_LENGTH - 2
         and p[1].startswith(eng_prefixes)
     )
 
@@ -147,18 +148,6 @@ def indexesFromSentence(lang, sentence):
     )
 
 
-# def tensorFromSentence(lang, sentence):
-#     indexes = indexesFromSentence(lang, sentence)
-#     indexes.append(EOS_token)
-#     return torch.tensor(indexes, dtype=torch.long, device=device).view(1, -1)
-
-
-# def tensorsFromPair(pair):
-#     input_tensor = tensorFromSentence(input_lang, pair[0])
-#     target_tensor = tensorFromSentence(output_lang, pair[1])
-#     return (input_tensor, target_tensor)
-
-
 def get_dataloader(batch_size):
     """Generate sequences with tokens
 
@@ -182,8 +171,7 @@ def get_dataloader(batch_size):
         print(f"input:{pairs[i]}")
     # TODO Remember to remove
     print(f"Rico: example token: {input_ids[0]}")
-    # TODO Remember to remove
-    print(f"Data length is {len(pairs)}")
+    print(f"Number of sentences is {len(pairs)}")
 
     train_data = TensorDataset(
         torch.LongTensor(input_ids).to(device), torch.LongTensor(target_ids).to(device)
@@ -205,6 +193,7 @@ def input_lang_sentence_to_tokens(src_sentence, input_lang):
         ]
         + [EOS_token]
     )
+
     return src_tokens
 
 

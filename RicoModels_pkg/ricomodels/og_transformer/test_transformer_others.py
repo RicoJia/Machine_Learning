@@ -26,13 +26,13 @@ import math
 import numpy as np
 
 BATCH_SIZE = 16
-EMBEDDING_DIM = 16
+EMBEDDING_DIM = 32
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
-ENCODER_LAYER_NUM = 1
-DECODER_LAYER_NUM = 1
-NUM_EPOCHS = 800
+ENCODER_LAYER_NUM = 4
+DECODER_LAYER_NUM = 4
+NUM_EPOCHS = 70
 GRADIENT_CLIPPED_NORM_MAX = 5.0
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
 INPUT_TOKEN_SIZE = input_lang.n_words
@@ -111,9 +111,9 @@ class Transformer(nn.Module):
         nn.init.xavier_uniform_(self.decoder_embedding.weight)
 
     def forward(self, src, tgt, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
-        """ Training Function of this Transformer wrapper
+        """Training Function of this Transformer wrapper
 
-        Args: 
+        Args:
             src (_type_): (batch_size, src sequence length)
             tgt (_type_): (batch_size, tgt sequence length)
             tgt_mask (_type_, optional): (sequence length, sequence length)
@@ -123,14 +123,9 @@ class Transformer(nn.Module):
         Returns:
             Logits: (batch_size, sequence length, num_tokens)
         """
-        # Src size must be 
-        # Tgt size must be 
-
         # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
-        src_1, tgt_1 = src, tgt
         src = self.encoder_embedding(src) * math.sqrt(self.dim_model)
         tgt = self.decoder_embedding(tgt) * math.sqrt(self.dim_model)
-        src_2, tgt_2 = src, tgt
         src = self.positional_encoder(src)
         tgt = self.positional_encoder(tgt)
 
@@ -155,20 +150,6 @@ class Transformer(nn.Module):
             print(f"NaN found in logits")
         return out
 
-    def get_tgt_mask(self, size) -> torch.tensor:
-        # Generates a squeare matrix where the each row allows one word more to be seen
-        mask = torch.tril(torch.ones(size, size) == 1)  # Lower triangular matrix
-        mask = mask.float()
-        mask = mask.masked_fill(
-            mask == 0, -1e9
-        )  # Convert zeros to small value. Not using -inf
-        return mask
-
-    def create_pad_mask(self, matrix: torch.tensor, pad_token: int) -> torch.tensor:
-        # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
-        # [False, False, False, True, True, True]
-        return matrix == pad_token
-
 
 def generate_square_subsequent_mask(sz, device):
     """
@@ -184,11 +165,17 @@ def generate_square_subsequent_mask(sz, device):
 
 
 def create_mask(src, tgt):
-    tgt_seq_len = tgt.size(1)
-    # 0 = unmask
-    tgt_mask = generate_square_subsequent_mask(tgt_seq_len, device=device)
+    # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
+    # [False, False, False, True, True, True]
     src_padding_mask = src == PAD_token
-    tgt_padding_mask = tgt == PAD_token
+    if tgt is not None:
+        tgt_padding_mask = tgt == PAD_token
+        tgt_seq_len = tgt.size(1)
+        # 0 = unmask
+        tgt_mask = generate_square_subsequent_mask(tgt_seq_len, device=device)
+    else:
+        tgt_padding_mask = None
+        tgt_mask = None
     return tgt_mask, src_padding_mask, tgt_padding_mask
 
 
@@ -273,7 +260,7 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
 
 
 def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
-    """ Translate all logits generated during training
+    """Translate all logits generated during training
 
     Args:
         logits_batch (_type_): [batch_size, sentence_length, ouput_token_dim]
@@ -314,26 +301,38 @@ def translate(model, src_sentence, output_lang):
     src_tokens = input_lang_sentence_to_tokens(
         src_sentence=src_sentence, input_lang=input_lang
     )
-    src = torch.LongTensor([src_tokens]).to(device)
+    src = PAD_token * torch.ones(
+        (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+    )  # Shape: (1, 1)
+    src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
+    src = src.to(device) 
 
-    ys = torch.tensor([[SOS_token]], dtype=torch.long, device=device)  # Shape: (1, 1)
-    for i in range(MAX_SENTENCE_LENGTH):
-        tgt_mask = model.transformer.generate_square_subsequent_mask(ys.size(1)).to(
-            device
-        )  # Shape: (tgt_seq_len, tgt_seq_len)
-        # Decode the target sequence
-        logits = model(
-            src=src,
-            tgt=ys,
-            # tgt_mask=tgt_mask
-        )
-        _, next_word = torch.max(logits, dim=-1)
-        # pred has all timesteps, so does next_word
-        next_word = next_word[-1].item()
-        ys = torch.cat(
-            [ys, torch.tensor([[next_word]], device=device)], dim=1
-        )  # Shape: (1, tgt_seq_len + 1)
-        if next_word == EOS_token:
+    ys = PAD_token * torch.ones(
+        (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+    )  # Shape: (1, 1)
+    ys[0][0] = SOS_token
+    ys = ys.to(device)
+    for i in range(MAX_SENTENCE_LENGTH - 1):
+        # Only pass the portion of ys that we have generated so far
+        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, ys)
+        tgt_mask = tgt_mask.to(device=device)
+        src_padding_mask = src_padding_mask.to(device=device)
+        tgt_padding_mask = tgt_padding_mask.to(device=device)
+        with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
+            # Run the model with the truncated ys
+            logits = model(
+                src=src,
+                tgt=ys,
+                tgt_mask=tgt_mask,
+                src_pad_mask=src_padding_mask,
+                tgt_pad_mask=tgt_padding_mask,  # Try disabling this at inference
+            )
+        # Get the next token prediction
+        indices = torch.argmax(logits, dim=-1)
+        last_word = indices[0, -1]  # The newly predicted token is the last one
+        # Append the newly predicted token to ys
+        ys[0, i + 1] = last_word
+        if last_word == EOS_token:
             break
     tgt_tokens = ys.flatten()
     translated_tokens = []
@@ -388,7 +387,16 @@ if __name__ == "__main__":
             epochs=NUM_EPOCHS,
             start_epoch=start_epoch,
         )
-    test_sentences = ["Eres tú", "Eres mala.", "Eres grande.", "Estás triste."]
+    test_sentences = [
+        "Eres tú",
+        "Eres mala.",
+        "Eres grande.",
+        "Estás triste.",
+        "estoy levantado",
+        "soy tom",
+        "soy gorda",
+        "estoy en forma",
+    ]
     model.eval()
     for test_sentence in test_sentences:
         translation = translate(model, test_sentence, output_lang)

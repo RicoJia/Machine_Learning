@@ -39,9 +39,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    # TODO
-    parser.add_argument("--eval", "-e", action="store_true", default=False)
-    # TODO
+    parser.add_argument("--eval", "-e", action="store_true", default=True)
     parser.add_argument("--debug", "-d", action="store_true", default=True)
     args = parser.parse_args()
     return args
