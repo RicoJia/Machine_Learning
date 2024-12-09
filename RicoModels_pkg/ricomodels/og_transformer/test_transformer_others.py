@@ -21,11 +21,13 @@ from ricomodels.og_transformer.translator_transformer import (
     load_model_and_optimizer,
     parse_args,
 )
+from ricomodels.utils.training_tools import get_scheduled_probability, clip_gradients
 import os
 import math
 import numpy as np
+from tqdm import tqdm
 
-BATCH_SIZE = 16
+BATCH_SIZE = 4
 EMBEDDING_DIM = 32
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
@@ -160,7 +162,7 @@ def generate_square_subsequent_mask(sz, device):
      [0.,   0.,   0.,   0., -inf],
      [0.,   0.,   0.,   0.,   0.]]
     """
-    mask = torch.triu(torch.ones(sz, sz, device=device) * -1e9, diagonal=1)
+    mask = torch.triu(torch.ones(sz, sz, device=device) * -1e9, diagonal=1).bool()
     return mask
 
 
@@ -179,60 +181,103 @@ def create_mask(src, tgt):
     return tgt_mask, src_padding_mask, tgt_padding_mask
 
 
-def train_epoch(model, optimizer, criterion, dataloader):
-    model.train()
+def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
+    """Training Epoch with Mixed Precision and teacher forcing.
+
+    Args:
+        teacher_forcing_ratio (float): percentage of groundtruth being used.
+            1.0 means using 100% groundtruth.
+
+    Returns:
+        Average loss
+    """
     total_loss = 0
     scaler = torch.amp.GradScaler(device=device, enabled=True)
-    with torch.autograd.set_detect_anomaly(True):
-        for src_batch, tgt_batch in dataloader:
-            optimizer.zero_grad()  # is it before or after scaler?
-            tgt_batch = tgt_batch.to(device)
-            src_batch = src_batch.to(device)
-            tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
-                src_batch, tgt_batch
-            )
-            tgt_mask = tgt_mask.to(device=device)
-            src_padding_mask = src_padding_mask.to(device=device)
-            tgt_padding_mask = tgt_padding_mask.to(device=device)
-            with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
-                logits = model(
-                    src=src_batch,  # [30, 16], [max_length, batch size]
-                    tgt=tgt_batch,  # [29, 16]
-                    tgt_mask=tgt_mask,  # 99, 99
-                    src_pad_mask=src_padding_mask,
-                    tgt_pad_mask=tgt_padding_mask,
+    model.train()
+    with torch.autograd.set_detect_anomaly(args.debug):
+        with tqdm(
+            total=len(dataloader), desc=f"Training Progress", unit="sentence"
+        ) as pbar:
+            for src_batch, tgt_batch in dataloader:
+                optimizer.zero_grad()  # is it before or after scaler?
+                tgt_batch = tgt_batch.to(device)
+                src_batch = src_batch.to(device)
+                tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
+                    src_batch, tgt_batch
                 )
-                loss = criterion(
-                    logits.reshape(
-                        -1, logits.size(-1)
-                    ),  # (batch_size * sequence length, output_token_dim)
-                    tgt_batch.reshape(
-                        -1
-                    ),  # tgt_batch is (batch_size * sequence length)
-                )
+                # TODO
+                # batch_size = tgt_batch.size(0)
+                # decoder input is initialized to [<SOS>, <PAD> ...]
+                # decoder_input = PAD_token * torch.ones(
+                #     batch_size, MAX_SENTENCE_LENGTH, dtype=tgt_batch.dtype, device=device
+                # )
+                decoder_input = (
+                    tgt_batch.clone().detach()
+                )  # [batch_size, 1], a bunch of <SOS>
+                decoder_input = decoder_input.to(device)
+                last_output = None
+                all_logits = []
+                with torch.autocast(
+                    device_type=device, dtype=torch.float16, enabled=True
+                ):
+                    for t in range(1, MAX_SENTENCE_LENGTH):
+                        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
+                            src_batch, decoder_input
+                        )
+                        tgt_mask = tgt_mask.to(device=device)
+                        src_padding_mask = src_padding_mask.to(device=device)
+                        tgt_padding_mask = tgt_padding_mask.to(device=device)
 
-            # calculate gradients
-            scaler.scale(loss).backward()
-            for name, param in model.named_parameters():
-                if torch.isinf(param.grad).any():
-                    print("inf: ", name)
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm=GRADIENT_CLIPPED_NORM_MAX
+                        if (
+                            last_output is not None
+                            and random.random() > teacher_forcing_ratio
+                        ):
+                            # TODO: without this clone(), the embedding layer would expect a version lower than this
+                            # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
+                            # So let's keep it for now
+                            decoder_input = decoder_input.clone()
+                            decoder_input[:, t] = last_output.detach()
+
+                        # [batch size, t, output_vocab_dim]
+                        logits = model(
+                            src=src_batch,  # [batch size, max_length]
+                            tgt=decoder_input,  # [batch size, t]
+                            tgt_mask=tgt_mask,  # 99, 99
+                            src_pad_mask=src_padding_mask,
+                            tgt_pad_mask=tgt_padding_mask,
+                        )
+                        last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
+                        last_output = last_logits.argmax(
+                            -1
+                        )  # this won't change decoder_input's version
+                        all_logits.append(
+                            last_logits
+                        )  # length: max_sentence_length - 1
+
+                    # [batch_size, max_length, output_vocab_dim]
+                    all_logits_tensor = torch.stack(all_logits, dim=1)
+                    loss = criterion(
+                        all_logits_tensor.reshape(
+                            -1, logits.size(-1)
+                        ),  # (batch_size * sequence length, output_token_dim)
+                        tgt_batch[:, 1:].reshape(
+                            -1
+                        ),  # tgt_batch is ((batch_size-1) * sequence length). Need to take the first one out because we are not considering SOS now
                     )
-                    print(
-                        f"Applied gradient clipping to norm :{GRADIENT_CLIPPED_NORM_MAX}"
-                    )
-                if torch.isnan(param.grad).any():
-                    print("nan: ", name)
-            # unscale gradients (from float16 to float32)
-            scaler.step(optimizer)
-            # Adjusts the scaling factor for the next iteration. If gradients are too low, increase the scaling factor.
-            scaler.update()
-            # optimizer.step()  # this could be dangerous, because we are reapplying stale gradients?
-            total_loss += loss.detach().item()
-            if args.debug:
-                training_logits_to_outuput_sentence(logits, tgt_batch, output_lang)
+
+                # calculate gradients
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                clip_gradients(model, GRADIENT_CLIPPED_NORM_MAX)
+                # unscale gradients (from float16 to float32)
+                scaler.step(optimizer)
+                # Adjusts the scaling factor for the next iteration. If gradients are too low, increase the scaling factor.
+                scaler.update()
+                # optimizer.step()  # this could be dangerous, because we are reapplying stale gradients?
+                total_loss += loss.detach().item()
+
+                pbar.update(src_batch.size(0))
+
     return total_loss / len(dataloader)
 
 
@@ -241,7 +286,6 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
     Method from "A detailed guide to Pytorch's nn.Transformer() module.", by
     Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
     """
-
     # Used for plotting later on
     train_loss_list, validation_loss_list = [], []
 
@@ -249,7 +293,21 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
     for epoch in range(start_epoch, epochs):
         print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
 
-        train_loss = train_epoch(model, opt, loss_fn, train_dataloader)
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=3),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler("./log"),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        ) as prof:
+            train_loss = train_epoch(
+                model, opt, loss_fn, train_dataloader, teacher_forcing_ratio=0.8
+            )
+            prof.step()
         train_loss_list += [train_loss]
 
         print(f"Training loss: {train_loss:.4f}")
@@ -257,6 +315,30 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
         save_model_and_optimizer(model, opt, epoch=epoch, path=MODEL_PATH)
 
     return train_loss_list, validation_loss_list
+
+
+###############################################################################
+# Validation Functions
+###############################################################################
+
+
+def test_decoder_translation(src_batch):
+    """Takes in a batch of sentences in tokens, prints the translation
+
+    Args:
+        src_batch (_type_): _description_
+    """
+    model.eval()
+    test_input_sentence_tokens = src_batch[0][1:-1]
+    sentence = []
+    for token in test_input_sentence_tokens:
+        token_idx = token.item()
+        if token_idx == EOS_token:
+            break
+        word = input_lang.index2word.get(token_idx, "<unk>")
+        sentence.append(word)
+    input_sentence = " ".join(sentence)
+    translate(model, input_sentence, output_lang)
 
 
 def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
@@ -305,7 +387,7 @@ def translate(model, src_sentence, output_lang):
         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
     )  # Shape: (1, 1)
     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-    src = src.to(device) 
+    src = src.to(device)
 
     ys = PAD_token * torch.ones(
         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
@@ -355,7 +437,6 @@ def translate(model, src_sentence, output_lang):
 if __name__ == "__main__":
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.autograd.set_detect_anomaly(args.debug)
     # input_vocab_dim, embedding_dim, num_heads
     model = Transformer(
         num_tokens=INPUT_TOKEN_SIZE,

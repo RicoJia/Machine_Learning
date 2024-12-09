@@ -88,6 +88,46 @@ def load_model(model_path, model, device):
         print("Initialized model")
 
 
+def get_scheduled_probability(start_p, end_p, d):
+    """
+    end_p * (start_p / end_p) ^ d
+    Args:
+        start_p (_type_): starting probability
+        end_p (_type_): ending probability
+        d (_type_): exponential term in [1, 0]
+    """
+
+    def check_in_range(var, var_name):
+        if var < 0.0 or var > 1.0:
+            raise ValueError(f"{var_name} must be in [0, 1], but it got value {var}")
+
+    check_in_range(start_p, "start_p")
+    check_in_range(end_p, "end_p")
+    check_in_range(d, "d")
+    return end_p * (start_p / end_p) ** d
+
+
+def clip_gradients(model, gradient_clipped_norm_max):
+    """Gradient clipping, should be called after unscaling
+
+    Args:
+        model (_type_): _description_
+    """
+    need_clipping=False
+    for name, param in model.named_parameters():
+        if torch.isinf(param.grad).any():
+            print("inf: ", name)
+            need_clipping = True
+        if torch.isnan(param.grad).any():
+            print("nan: ", name)
+            need_clipping = True
+    if need_clipping:
+        torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=gradient_clipped_norm_max
+        )
+        print(f"Applied gradient clipping to norm :{gradient_clipped_norm_max}")
+
+
 class EarlyStopping:
     def __init__(self, delta=1e-8, patience=5, verbose=False) -> None:
         """
