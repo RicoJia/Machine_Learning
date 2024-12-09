@@ -196,7 +196,7 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
     model.train()
     with torch.autograd.set_detect_anomaly(args.debug):
         with tqdm(
-            total=len(dataloader), desc=f"Training Progress", unit="sentence"
+            total=len(dataloader), desc=f"Training Progress", unit="batch"
         ) as pbar:
             for src_batch, tgt_batch in dataloader:
                 optimizer.zero_grad()  # is it before or after scaler?
@@ -276,7 +276,7 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
                 # optimizer.step()  # this could be dangerous, because we are reapplying stale gradients?
                 total_loss += loss.detach().item()
 
-                pbar.update(src_batch.size(0))
+                pbar.update(1)
 
     return total_loss / len(dataloader)
 
