@@ -17,7 +17,6 @@ from ricomodels.seq2seq.dataload_seq2seq import (
 from ricomodels.utils.data_loading import get_package_dir
 from ricomodels.og_transformer.translator_transformer import (
     save_model_and_optimizer,
-    MODEL_PATH,
     load_model_and_optimizer,
     parse_args,
 )
@@ -27,18 +26,25 @@ import math
 import numpy as np
 from tqdm import tqdm
 
+EFFECTIVE_BATCH_SIZE = 16
 BATCH_SIZE = 4
+ACCUMULATION_STEPS = int(EFFECTIVE_BATCH_SIZE / BATCH_SIZE)
 EMBEDDING_DIM = 32
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
-ENCODER_LAYER_NUM = 4
-DECODER_LAYER_NUM = 4
+ENCODER_LAYER_NUM = 2
+DECODER_LAYER_NUM = 2
 NUM_EPOCHS = 70
 GRADIENT_CLIPPED_NORM_MAX = 5.0
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
 INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
+MODEL_PATH = os.path.join(
+    get_package_dir(),
+    "og_transformer",
+    f"spanish2english_{MAX_SENTENCE_LENGTH}tokens_{EMBEDDING_DIM}dim.pth",
+)
 
 
 class PositionalEncoding(nn.Module):
@@ -85,7 +91,8 @@ class Transformer(nn.Module):
     # Constructor
     def __init__(
         self,
-        num_tokens,
+        input_token_size,
+        output_token_size,
         dim_model,
         num_heads,
         num_encoder_layers,
@@ -99,8 +106,8 @@ class Transformer(nn.Module):
         self.positional_encoder = PositionalEncoding(
             dim_model=dim_model, dropout_p=dropout_p, max_len=MAX_SENTENCE_LENGTH
         )
-        self.encoder_embedding = nn.Embedding(num_tokens, dim_model)
-        self.decoder_embedding = nn.Embedding(num_tokens, dim_model)
+        self.encoder_embedding = nn.Embedding(input_token_size, dim_model)
+        self.decoder_embedding = nn.Embedding(input_token_size, dim_model)
         self.transformer = nn.Transformer(
             d_model=dim_model,
             nhead=num_heads,
@@ -108,7 +115,7 @@ class Transformer(nn.Module):
             num_decoder_layers=num_decoder_layers,
             dropout=dropout_p,
         )
-        self.out = nn.Linear(dim_model, num_tokens)
+        self.out = nn.Linear(dim_model, output_token_size)
         nn.init.xavier_uniform_(self.encoder_embedding.weight)
         nn.init.xavier_uniform_(self.decoder_embedding.weight)
 
@@ -153,7 +160,7 @@ class Transformer(nn.Module):
         return out
 
 
-def generate_square_subsequent_mask(sz, device):
+def generate_square_subsequent_mask(sz):
     """
     EX for size=5:
     [[0., -inf, -inf, -inf, -inf],
@@ -166,19 +173,84 @@ def generate_square_subsequent_mask(sz, device):
     return mask
 
 
-def create_mask(src, tgt):
+def create_mask_on_device(src, tgt, device):
+    """Create masks optionally on the current chosen device
+
+    Args:
+        src (_type_): _description_
+        tgt (_type_): _description_
+        device (_type_): _description_
+
+    Returns:
+        tgt_mask (optional) look ahead mask
+        src_padding_mask: padding mask that masks out padding in src
+        tgt_padding_mask (optional) padding mask if tgt is specified
+    """
     # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
     # [False, False, False, True, True, True]
-    src_padding_mask = src == PAD_token
+    src_padding_mask = (src == PAD_token).to(device)
     if tgt is not None:
-        tgt_padding_mask = tgt == PAD_token
+        tgt_padding_mask = (tgt == PAD_token).to(device)
         tgt_seq_len = tgt.size(1)
         # 0 = unmask
-        tgt_mask = generate_square_subsequent_mask(tgt_seq_len, device=device)
+        tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
     else:
         tgt_padding_mask = None
         tgt_mask = None
     return tgt_mask, src_padding_mask, tgt_padding_mask
+
+
+def train_with_teacher_enforcing(
+    src_batch: torch.Tensor,
+    tgt_batch: torch.Tensor,
+    decoder_input: torch.Tensor,
+    teacher_forcing_ratio: float,
+    criterion: nn.Module,
+) -> torch.Tensor:
+    last_output = None
+    if_EOS_across_batch = torch.zeros(src_batch.size(0), device=device).bool()
+    # TODO: to write: the last batch could have a different size
+    all_output_logits = PAD_token * torch.ones(
+        (src_batch.size(0), MAX_SENTENCE_LENGTH, OUTPUT_TOKEN_SIZE), device=device
+    )
+    for t in range(0, MAX_SENTENCE_LENGTH):
+        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
+            src_batch, decoder_input, device=device
+        )
+
+        if last_output is not None and random.random() > teacher_forcing_ratio:
+            # TODO: without this clone(), the embedding layer would expect a version lower than this
+            # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
+            # So let's keep it for now
+            decoder_input = decoder_input.clone()
+            decoder_input[:, t] = last_output.detach()
+        # [batch size, t, output_vocab_dim]
+        logits = model(
+            src=src_batch,  # [batch size, max_length]
+            tgt=decoder_input,  # [batch size, t]
+            tgt_mask=tgt_mask,  # 99, 99
+            src_pad_mask=src_padding_mask,
+            tgt_pad_mask=tgt_padding_mask,
+        )
+        last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
+        last_output = last_logits.argmax(
+            -1
+        )  # this won't change decoder_input's version
+        all_output_logits[:, t, :] = last_logits  # length: max_sentence_length - 1
+
+        # check if <EOS> appears across the entire batch
+        if_EOS_across_batch |= (last_output == EOS_token)
+        if if_EOS_across_batch.all():
+            break
+    loss = criterion(
+        all_output_logits.reshape(
+            -1, logits.size(-1)
+        ),  # (batch_size * sequence length, output_token_dim)
+        tgt_batch.reshape(
+            -1
+        ),  # tgt_batch is ((batch_size-1) * sequence length). Need to take the first one out because we are not considering SOS now
+    )
+    return loss
 
 
 def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
@@ -194,87 +266,36 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
     total_loss = 0
     scaler = torch.amp.GradScaler(device=device, enabled=True)
     model.train()
+
     with torch.autograd.set_detect_anomaly(args.debug):
-        with tqdm(
-            total=len(dataloader), desc=f"Training Progress", unit="batch"
-        ) as pbar:
-            for src_batch, tgt_batch in dataloader:
-                optimizer.zero_grad()  # is it before or after scaler?
+        with tqdm(total=len(dataloader), desc=f"Training", unit="batch") as pbar:
+            for i, (src_batch, tgt_batch) in enumerate(dataloader):
                 tgt_batch = tgt_batch.to(device)
                 src_batch = src_batch.to(device)
-                tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
-                    src_batch, tgt_batch
-                )
-                # TODO
-                # batch_size = tgt_batch.size(0)
-                # decoder input is initialized to [<SOS>, <PAD> ...]
-                # decoder_input = PAD_token * torch.ones(
-                #     batch_size, MAX_SENTENCE_LENGTH, dtype=tgt_batch.dtype, device=device
-                # )
                 decoder_input = (
                     tgt_batch.clone().detach()
                 )  # [batch_size, 1], a bunch of <SOS>
                 decoder_input = decoder_input.to(device)
-                last_output = None
-                all_logits = []
-                with torch.autocast(
-                    device_type=device, dtype=torch.float16, enabled=True
-                ):
-                    for t in range(1, MAX_SENTENCE_LENGTH):
-                        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(
-                            src_batch, decoder_input
-                        )
-                        tgt_mask = tgt_mask.to(device=device)
-                        src_padding_mask = src_padding_mask.to(device=device)
-                        tgt_padding_mask = tgt_padding_mask.to(device=device)
-
-                        if (
-                            last_output is not None
-                            and random.random() > teacher_forcing_ratio
-                        ):
-                            # TODO: without this clone(), the embedding layer would expect a version lower than this
-                            # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
-                            # So let's keep it for now
-                            decoder_input = decoder_input.clone()
-                            decoder_input[:, t] = last_output.detach()
-
-                        # [batch size, t, output_vocab_dim]
-                        logits = model(
-                            src=src_batch,  # [batch size, max_length]
-                            tgt=decoder_input,  # [batch size, t]
-                            tgt_mask=tgt_mask,  # 99, 99
-                            src_pad_mask=src_padding_mask,
-                            tgt_pad_mask=tgt_padding_mask,
-                        )
-                        last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
-                        last_output = last_logits.argmax(
-                            -1
-                        )  # this won't change decoder_input's version
-                        all_logits.append(
-                            last_logits
-                        )  # length: max_sentence_length - 1
-
-                    # [batch_size, max_length, output_vocab_dim]
-                    all_logits_tensor = torch.stack(all_logits, dim=1)
-                    loss = criterion(
-                        all_logits_tensor.reshape(
-                            -1, logits.size(-1)
-                        ),  # (batch_size * sequence length, output_token_dim)
-                        tgt_batch[:, 1:].reshape(
-                            -1
-                        ),  # tgt_batch is ((batch_size-1) * sequence length). Need to take the first one out because we are not considering SOS now
-                    )
+                batch_loss = train_with_teacher_enforcing(
+                    src_batch=src_batch,
+                    tgt_batch=tgt_batch,
+                    decoder_input=decoder_input,
+                    teacher_forcing_ratio=teacher_forcing_ratio,
+                    criterion=criterion,
+                )
+                effective_batch_loss = batch_loss / ACCUMULATION_STEPS
 
                 # calculate gradients
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                clip_gradients(model, GRADIENT_CLIPPED_NORM_MAX)
+                scaler.scale(effective_batch_loss).backward()
+                total_loss += effective_batch_loss.detach().item()
                 # unscale gradients (from float16 to float32)
-                scaler.step(optimizer)
-                # Adjusts the scaling factor for the next iteration. If gradients are too low, increase the scaling factor.
-                scaler.update()
-                # optimizer.step()  # this could be dangerous, because we are reapplying stale gradients?
-                total_loss += loss.detach().item()
+                if (i + 1) % ACCUMULATION_STEPS == 0:
+                    scaler.unscale_(optimizer)
+                    clip_gradients(model, GRADIENT_CLIPPED_NORM_MAX)
+                    scaler.step(optimizer)
+                    # Adjusts the scaling factor for the next iteration. If gradients are too low, increase the scaling factor.
+                    scaler.update()
+                    optimizer.zero_grad()
 
                 pbar.update(1)
 
@@ -291,8 +312,11 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
 
     print("Training and validating model")
     for epoch in range(start_epoch, epochs):
+        # TODO: think more
+        torch.cuda.empty_cache()
         print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
 
+        # TODO: where is this saved to?
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -396,10 +420,9 @@ def translate(model, src_sentence, output_lang):
     ys = ys.to(device)
     for i in range(MAX_SENTENCE_LENGTH - 1):
         # Only pass the portion of ys that we have generated so far
-        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, ys)
-        tgt_mask = tgt_mask.to(device=device)
-        src_padding_mask = src_padding_mask.to(device=device)
-        tgt_padding_mask = tgt_padding_mask.to(device=device)
+        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
+            src, ys, device=device
+        )
         with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
             # Run the model with the truncated ys
             logits = model(
@@ -439,7 +462,8 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # input_vocab_dim, embedding_dim, num_heads
     model = Transformer(
-        num_tokens=INPUT_TOKEN_SIZE,
+        input_token_size=INPUT_TOKEN_SIZE,
+        output_token_size=OUTPUT_TOKEN_SIZE,
         dim_model=EMBEDDING_DIM,
         num_heads=NUM_HEADS,
         num_encoder_layers=ENCODER_LAYER_NUM,
@@ -452,11 +476,7 @@ if __name__ == "__main__":
     model, opt, start_epoch = load_model_and_optimizer(
         model,
         opt,
-        path=os.path.join(
-            get_package_dir(),
-            "og_transformer",
-            MODEL_PATH,
-        ),
+        path=MODEL_PATH,
         device=device,
     )
     if not args.eval:
