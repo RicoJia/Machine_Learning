@@ -82,6 +82,7 @@ def train_model(
     wandb_logger,
     NUM_EPOCHS,
     device,
+    debug: bool,
 ):
     early_stopping = EarlyStopping(delta=1e-3, patience=1)
     timer = TrainingTimer()
@@ -92,64 +93,67 @@ def train_model(
         model.train()
         epoch_loss = 0.0
 
-        with tqdm(
-            total=num_training, desc=f"Epoch [{epoch }/{NUM_EPOCHS}]", unit="img"
-        ) as pbar:
-            for i, (inputs, labels) in enumerate(train_loader):
-                check_model_image_channel_num(
-                    img_channels=inputs.shape[1], model_channels=model.n_channels
+        with torch.autograd.set_grad_enabled(debug):
+            with tqdm(
+                total=num_training, desc=f"Epoch [{epoch }/{NUM_EPOCHS}]", unit="img"
+            ) as pbar:
+                for i, (inputs, labels) in enumerate(train_loader):
+                    check_model_image_channel_num(
+                        img_channels=inputs.shape[1], model_channels=model.n_channels
+                    )
+                    # outside autocast because labels (long) could have issues with fp16 casting
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+                    with torch.autocast(
+                        device_type=device_type, dtype=torch.float16, enabled=USE_AMP
+                    ):
+                        # this should be torch.float16 if USE_AMP
+                        outputs = model(inputs)
+                        # loss is autocast to torch.float32
+                        loss = criterion(outputs, labels) / ACCUMULATION_STEPS
+                    pbar.update(inputs.shape[0])
+                    pbar.set_postfix(**{"loss (batch)": loss.item()})
+                    # exits autocast before backward()
+                    # create scaled gradients
+                    scaler.scale(loss).backward()
+                    # loss.backward()
+                    if (i + 1) % ACCUMULATION_STEPS == 0:
+                        # optimizer.step()
+                        # First, gradients of optimizer params are unscaled here. Unless nan or inf shows up, optimizer.step() is called
+                        scaler.step(optimizer)
+                        scaler.update()
+                        optimizer.zero_grad()
+                    epoch_loss += loss.item()
+                epoch_loss /= num_training
+                current_lr = optimizer.param_groups[0]["lr"]
+                scheduler.step(metrics=epoch_loss)
+                total_weight_norm = get_total_weight_norm(model)
+                wandb_weight_histogram_logging(model, epoch)
+                wandb_logger.log(
+                    {
+                        "epoch loss": epoch_loss,
+                        "epoch": epoch,
+                        "learning rate": current_lr,
+                        "total_weight_norm": total_weight_norm,
+                        "elapsed_time": timer.lapse_time(),
+                    }
                 )
-                # outside autocast because labels (long) could have issues with fp16 casting
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                with torch.autocast(
-                    device_type=device_type, dtype=torch.float16, enabled=USE_AMP
-                ):
-                    # this should be torch.float16 if USE_AMP
-                    outputs = model(inputs)
-                    # loss is autocast to torch.float32
-                    loss = criterion(outputs, labels) / ACCUMULATION_STEPS
-                pbar.update(inputs.shape[0])
-                pbar.set_postfix(**{"loss (batch)": loss.item()})
-                # exits autocast before backward()
-                # create scaled gradients
-                scaler.scale(loss).backward()
-                # loss.backward()
-                if (i + 1) % ACCUMULATION_STEPS == 0:
-                    # optimizer.step()
-                    # First, gradients of optimizer params are unscaled here. Unless nan or inf shows up, optimizer.step() is called
-                    scaler.step(optimizer)
-                    scaler.update()
-                    optimizer.zero_grad()
-                epoch_loss += loss.item()
-            epoch_loss /= num_training
-            current_lr = optimizer.param_groups[0]["lr"]
-            scheduler.step(metrics=epoch_loss)
-            total_weight_norm = get_total_weight_norm(model)
-            wandb_weight_histogram_logging(model, epoch)
-            wandb_logger.log(
-                {
-                    "epoch loss": epoch_loss,
-                    "epoch": epoch,
-                    "learning rate": current_lr,
-                    "total_weight_norm": total_weight_norm,
-                    "elapsed_time": timer.lapse_time(),
-                }
-            )
 
-        if epoch % SAVE_EVERY_N_EPOCH == 0:
-            torch.save(model.state_dict(), MODEL_PATH)
-            logging.info(f"Saved model {MODEL_PATH}")
-        if early_stopping(epoch_loss):
-            logging.info("Early stopping triggered")
-            break
+            if epoch % SAVE_EVERY_N_EPOCH == 0:
+                torch.save(model.state_dict(), MODEL_PATH)
+                logging.info(f"Saved model {MODEL_PATH}")
+            if early_stopping(epoch_loss):
+                logging.info("Early stopping triggered")
+                break
     logging.info("Training complete")
     return epoch
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    # TODO
     parser.add_argument("--eval", "-e", action="store_true", default=False)
+    parser.add_argument("--debug", "-d", action="store_true", default=False)
     args = parser.parse_args()
     return args
 
@@ -191,6 +195,7 @@ if __name__ == "__main__":
             device=device,
             num_training=len(train_dataset),
             wandb_logger=wandb_logger,
+            debug=args.debug,
         )
     train_dataset.set_effective_length_if_necessary(stop_at=1000)
     multiclass_thre = MULTICLASS_CLASSIFICATION_THRE
