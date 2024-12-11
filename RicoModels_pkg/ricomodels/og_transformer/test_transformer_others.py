@@ -27,7 +27,7 @@ import numpy as np
 from tqdm import tqdm
 
 EFFECTIVE_BATCH_SIZE = 16
-BATCH_SIZE = 4
+BATCH_SIZE = 1
 ACCUMULATION_STEPS = int(EFFECTIVE_BATCH_SIZE / BATCH_SIZE)
 EMBEDDING_DIM = 32
 NUM_HEADS = 8
@@ -35,8 +35,9 @@ DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
 ENCODER_LAYER_NUM = 2
 DECODER_LAYER_NUM = 2
-NUM_EPOCHS = 70
+NUM_EPOCHS = 600
 GRADIENT_CLIPPED_NORM_MAX = 5.0
+TEACHER_FORCING_RATIO = 0.1
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
 INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
@@ -209,7 +210,6 @@ def train_with_teacher_enforcing(
 ) -> torch.Tensor:
     last_output = None
     if_EOS_across_batch = torch.zeros(src_batch.size(0), device=device).bool()
-    # TODO: to write: the last batch could have a different size
     all_output_logits = PAD_token * torch.ones(
         (src_batch.size(0), MAX_SENTENCE_LENGTH, OUTPUT_TOKEN_SIZE), device=device
     )
@@ -239,7 +239,7 @@ def train_with_teacher_enforcing(
         all_output_logits[:, t, :] = last_logits  # length: max_sentence_length - 1
 
         # check if <EOS> appears across the entire batch
-        if_EOS_across_batch |= (last_output == EOS_token)
+        if_EOS_across_batch |= last_output == EOS_token
         if if_EOS_across_batch.all():
             break
     loss = criterion(
@@ -250,6 +250,10 @@ def train_with_teacher_enforcing(
             -1
         ),  # tgt_batch is ((batch_size-1) * sequence length). Need to take the first one out because we are not considering SOS now
     )
+    if args.debug:
+        training_logits_to_outuput_sentence(
+            logits_batch=all_output_logits, tgt_batch=tgt_batch, output_lang=output_lang
+        )
     return loss
 
 
@@ -283,6 +287,7 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
                     teacher_forcing_ratio=teacher_forcing_ratio,
                     criterion=criterion,
                 )
+                # effective_batch_loss = batch_loss / ACCUMULATION_STEPS
                 effective_batch_loss = batch_loss / ACCUMULATION_STEPS
 
                 # calculate gradients
@@ -329,7 +334,11 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
             with_stack=True,
         ) as prof:
             train_loss = train_epoch(
-                model, opt, loss_fn, train_dataloader, teacher_forcing_ratio=0.8
+                model,
+                opt,
+                loss_fn,
+                train_dataloader,
+                teacher_forcing_ratio=TEACHER_FORCING_RATIO,
             )
             prof.step()
         train_loss_list += [train_loss]
@@ -383,8 +392,6 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
             ys = torch.cat(
                 [ys, torch.tensor([[next_word]], device=device)], dim=1
             )  # Shape: (1, tgt_seq_len + 1)
-            # if next_word == EOS_token:
-            #     break
         pred_tokens = ys.flatten()
         translated_tokens = []
         for token in pred_tokens:
@@ -392,10 +399,14 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
             word = output_lang.index2word.get(token_idx, "<unk>")
             translated_tokens.append(word)
         tgt_tokens = []
-        for token in tgt:
-            token_idx = token.item()
-            word = output_lang.index2word.get(token_idx, "<unk>")
-            tgt_tokens.append(word)
+        try:
+            for token in tgt:
+                token_idx = token.item()
+                word = output_lang.index2word.get(token_idx, "<unk>")
+                tgt_tokens.append(word)
+        except:
+            # TODO: this is a hack for translate(). Please make this better when able.
+            pass
         print(
             f"Translated sentence during training: {translated_tokens}, target: {tgt_tokens}"
         )
@@ -418,6 +429,9 @@ def translate(model, src_sentence, output_lang):
     )  # Shape: (1, 1)
     ys[0][0] = SOS_token
     ys = ys.to(device)
+    all_output_logits = PAD_token * torch.ones(
+        (1, MAX_SENTENCE_LENGTH, OUTPUT_TOKEN_SIZE), device=device
+    )
     for i in range(MAX_SENTENCE_LENGTH - 1):
         # Only pass the portion of ys that we have generated so far
         tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
@@ -432,29 +446,16 @@ def translate(model, src_sentence, output_lang):
                 src_pad_mask=src_padding_mask,
                 tgt_pad_mask=tgt_padding_mask,  # Try disabling this at inference
             )
-        # Get the next token prediction
-        indices = torch.argmax(logits, dim=-1)
-        last_word = indices[0, -1]  # The newly predicted token is the last one
-        # Append the newly predicted token to ys
-        ys[0, i + 1] = last_word
-        if last_word == EOS_token:
-            break
-    tgt_tokens = ys.flatten()
-    translated_tokens = []
-    for token in tgt_tokens:
-        token_idx = token.item()
-        word = output_lang.index2word.get(token_idx, "<unk>")
-        translated_tokens.append(word)
-
-    # Exclude SOS and EOS tokens
-    if translated_tokens[0] == SOS_token:
-        translated_tokens = translated_tokens[1:]
-    if translated_tokens[-1] == EOS_token:
-        translated_tokens = translated_tokens[:-1]
-
-    # Join tokens into a single string
-    translated_sentence = " ".join(translated_tokens)
-    return translated_sentence
+        last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
+        all_output_logits[:, i, :] = last_logits  # length: max_sentence_length - 1
+        last_output = last_logits.argmax(-1)
+        ys[:, i] = last_output
+    training_logits_to_outuput_sentence(
+        # TODO: tgt_batch=all_output_logits is a HACK
+        logits_batch=all_output_logits,
+        tgt_batch=all_output_logits,
+        output_lang=output_lang,
+    )
 
 
 if __name__ == "__main__":
@@ -493,12 +494,14 @@ if __name__ == "__main__":
         "Eres mala.",
         "Eres grande.",
         "Estás triste.",
-        "estoy levantado",
+        "estoy en el banco",
         "soy tom",
         "soy gorda",
         "estoy en forma",
+        "Estoy trabajando.",
+        "Estoy levantado.",
+        "Estoy de acuerdo.",
     ]
     model.eval()
     for test_sentence in test_sentences:
-        translation = translate(model, test_sentence, output_lang)
-        print(f"Test Sentence: {test_sentence}, Translation: {translation}")
+        translate(model, test_sentence, output_lang)
