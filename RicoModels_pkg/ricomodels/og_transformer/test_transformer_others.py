@@ -6,8 +6,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
+import argparse
 from ricomodels.seq2seq.dataload_seq2seq import (
     get_dataloader,
+    Lang,
     EOS_token,
     SOS_token,
     MAX_LENGTH,
@@ -18,16 +20,17 @@ from ricomodels.utils.data_loading import get_package_dir
 from ricomodels.og_transformer.translator_transformer import (
     save_model_and_optimizer,
     load_model_and_optimizer,
-    parse_args,
 )
 from ricomodels.utils.training_tools import get_scheduled_probability, clip_gradients
 import os
 import math
 import numpy as np
 from tqdm import tqdm
+import wandb
+from ricomodels.utils.visualization import TrainingTimer
 
 EFFECTIVE_BATCH_SIZE = 16
-BATCH_SIZE = 1
+BATCH_SIZE = 4
 ACCUMULATION_STEPS = int(EFFECTIVE_BATCH_SIZE / BATCH_SIZE)
 EMBEDDING_DIM = 32
 NUM_HEADS = 8
@@ -35,17 +38,27 @@ DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
 ENCODER_LAYER_NUM = 2
 DECODER_LAYER_NUM = 2
-NUM_EPOCHS = 600
+NUM_EPOCHS = 300
 GRADIENT_CLIPPED_NORM_MAX = 5.0
-TEACHER_FORCING_RATIO = 0.1
+TEACHER_FORCING_RATIO_MIN = 0.4
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
 INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
+# Not recommended, because in certain predictions, EOS might yield the same loss as wrong predictions.
+TERMINATE_TRAINING_UPON_EOS = False
 MODEL_PATH = os.path.join(
     get_package_dir(),
     "og_transformer",
     f"spanish2english_{MAX_SENTENCE_LENGTH}tokens_{EMBEDDING_DIM}dim.pth",
 )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--eval", "-e", action="store_true", default=False)
+    parser.add_argument("--debug", "-d", action="store_true", default=False)
+    args = parser.parse_args()
+    return args
 
 
 class PositionalEncoding(nn.Module):
@@ -201,6 +214,11 @@ def create_mask_on_device(src, tgt, device):
     return tgt_mask, src_padding_mask, tgt_padding_mask
 
 
+###############################################################################
+# Training Functions
+###############################################################################
+
+
 def train_with_teacher_enforcing(
     src_batch: torch.Tensor,
     tgt_batch: torch.Tensor,
@@ -217,7 +235,6 @@ def train_with_teacher_enforcing(
         tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
             src_batch, decoder_input, device=device
         )
-
         if last_output is not None and random.random() > teacher_forcing_ratio:
             # TODO: without this clone(), the embedding layer would expect a version lower than this
             # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
@@ -239,9 +256,10 @@ def train_with_teacher_enforcing(
         all_output_logits[:, t, :] = last_logits  # length: max_sentence_length - 1
 
         # check if <EOS> appears across the entire batch
-        if_EOS_across_batch |= last_output == EOS_token
-        if if_EOS_across_batch.all():
-            break
+        if TERMINATE_TRAINING_UPON_EOS:
+            if_EOS_across_batch |= last_output == EOS_token
+            if if_EOS_across_batch.all():
+                break
     loss = criterion(
         all_output_logits.reshape(
             -1, logits.size(-1)
@@ -267,6 +285,7 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
     Returns:
         Average loss
     """
+    print(f"Teacher Forcing Ratio: {teacher_forcing_ratio}")
     total_loss = 0
     scaler = torch.amp.GradScaler(device=device, enabled=True)
     model.train()
@@ -313,9 +332,30 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
     Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
     """
     # Used for plotting later on
-    train_loss_list, validation_loss_list = [], []
+    wandb_logger = wandb.init(
+        project="Torch-Transformer", resume="allow", anonymous="must"
+    )
+    wandb_logger.config.update(
+        dict(
+            epochs=NUM_EPOCHS,
+            batch_size=EFFECTIVE_BATCH_SIZE,
+            embedding_dim=EMBEDDING_DIM,
+            num_heads=NUM_HEADS,
+            max_sentence_length=MAX_SENTENCE_LENGTH,
+            encoder_layer_num=ENCODER_LAYER_NUM,
+            decoder_layer_num=DECODER_LAYER_NUM,
+            num_epochs=NUM_EPOCHS,
+            teacher_forcing_ratio_min=0.4,
+        )
+    )
+    timer = TrainingTimer()
 
     print("Training and validating model")
+    scheduled_teacher_forcing_ratios = [
+        get_scheduled_probability(1.0, TEACHER_FORCING_RATIO_MIN, epoch / epochs)
+        for epoch in range(epochs)
+    ]
+
     for epoch in range(start_epoch, epochs):
         # TODO: think more
         torch.cuda.empty_cache()
@@ -338,16 +378,23 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
                 opt,
                 loss_fn,
                 train_dataloader,
-                teacher_forcing_ratio=TEACHER_FORCING_RATIO,
+                teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
             )
             prof.step()
-        train_loss_list += [train_loss]
 
-        print(f"Training loss: {train_loss:.4f}")
-        print()
+        print(f"Training loss: {train_loss:.4f} \n")
+        wandb_logger.log(
+            {
+                "epoch loss": train_loss,
+                "epoch": epoch,
+                "teacher forcing ratio": scheduled_teacher_forcing_ratios[epoch],
+                "elapsed_time": timer.lapse_time(),
+            }
+        )
         save_model_and_optimizer(model, opt, epoch=epoch, path=MODEL_PATH)
 
-    return train_loss_list, validation_loss_list
+    wandb.finish()
+    return train_loss_list
 
 
 ###############################################################################
@@ -355,23 +402,25 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
 ###############################################################################
 
 
-def test_decoder_translation(src_batch):
-    """Takes in a batch of sentences in tokens, prints the translation
+def tokens_to_words(tokens: torch.Tensor, lang: Lang):
+    """Convert a batch of tokens to words
 
     Args:
-        src_batch (_type_): _description_
+        tokens (torch.Tensor): a batch of tokens
+
+    Returns:
+        [[words]]
     """
-    model.eval()
-    test_input_sentence_tokens = src_batch[0][1:-1]
-    sentence = []
-    for token in test_input_sentence_tokens:
-        token_idx = token.item()
-        if token_idx == EOS_token:
-            break
-        word = input_lang.index2word.get(token_idx, "<unk>")
-        sentence.append(word)
-    input_sentence = " ".join(sentence)
-    translate(model, input_sentence, output_lang)
+    # tokens: [batch_size, sentence_length]
+    batch_translated_tokens = []
+    for token_single_batch in tokens:
+        translated_tokens = []
+        for token in token_single_batch:
+            token_idx = token.item()
+            word = lang.index2word.get(token_idx, "<unk>")
+            translated_tokens.append(word)
+        batch_translated_tokens.append(translated_tokens)
+    return batch_translated_tokens
 
 
 def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
@@ -392,18 +441,22 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
             ys = torch.cat(
                 [ys, torch.tensor([[next_word]], device=device)], dim=1
             )  # Shape: (1, tgt_seq_len + 1)
-        pred_tokens = ys.flatten()
-        translated_tokens = []
-        for token in pred_tokens:
-            token_idx = token.item()
-            word = output_lang.index2word.get(token_idx, "<unk>")
-            translated_tokens.append(word)
+
+        # TODO: this might break
+        translated_tokens = tokens_to_words(tokens=ys, lang=output_lang)
+        # pred_tokens = ys.flatten()
+        # translated_tokens = []
+        # for token in pred_tokens:
+        #     token_idx = token.item()
+        #     word = output_lang.index2word.get(token_idx, "<unk>")
+        #     translated_tokens.append(word)
         tgt_tokens = []
         try:
-            for token in tgt:
-                token_idx = token.item()
-                word = output_lang.index2word.get(token_idx, "<unk>")
-                tgt_tokens.append(word)
+            tgt_tokens = tokens_to_words(tokens=tgt, lang=output_lang)
+            # for token in tgt:
+            #     token_idx = token.item()
+            #     word = output_lang.index2word.get(token_idx, "<unk>")
+            #     tgt_tokens.append(word)
         except:
             # TODO: this is a hack for translate(). Please make this better when able.
             pass
@@ -412,51 +465,53 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
         )
 
 
-# TODO: this might be broken, focus on training now
 @torch.inference_mode()
-def translate(model, src_sentence, output_lang):
-    src_tokens = input_lang_sentence_to_tokens(
-        src_sentence=src_sentence, input_lang=input_lang
-    )
-    src = PAD_token * torch.ones(
-        (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
-    )  # Shape: (1, 1)
-    src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-    src = src.to(device)
-
-    ys = PAD_token * torch.ones(
-        (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
-    )  # Shape: (1, 1)
-    ys[0][0] = SOS_token
-    ys = ys.to(device)
-    all_output_logits = PAD_token * torch.ones(
-        (1, MAX_SENTENCE_LENGTH, OUTPUT_TOKEN_SIZE), device=device
-    )
-    for i in range(MAX_SENTENCE_LENGTH - 1):
-        # Only pass the portion of ys that we have generated so far
-        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
-            src, ys, device=device
-        )
-        with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
-            # Run the model with the truncated ys
-            logits = model(
-                src=src,
-                tgt=ys,
-                tgt_mask=tgt_mask,
-                src_pad_mask=src_padding_mask,
-                tgt_pad_mask=tgt_padding_mask,  # Try disabling this at inference
+def validate(model, dataloader):
+    for i, (src_batch, tgt_batch) in enumerate(dataloader):
+        tgt_batch = tgt_batch.to(device)
+        src_batch = src_batch.to(device)
+        decoder_input = PAD_token * torch.ones(
+            (src_batch.size(0), MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+        )  # Shape: (1, 1)
+        decoder_input[:, 0] = SOS_token
+        decoder_input = decoder_input.to(device)
+        for t in range(1, MAX_SENTENCE_LENGTH):
+            # Only pass the portion of ys that we have generated so far
+            tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
+                src_batch, decoder_input, device=device
             )
-        last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
-        all_output_logits[:, i, :] = last_logits  # length: max_sentence_length - 1
-        last_output = last_logits.argmax(-1)
-        ys[:, i] = last_output
-    training_logits_to_outuput_sentence(
-        # TODO: tgt_batch=all_output_logits is a HACK
-        logits_batch=all_output_logits,
-        tgt_batch=all_output_logits,
-        output_lang=output_lang,
-    )
+            with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
+                # Run the model with the truncated ys
+                logits = model(
+                    src=src_batch,
+                    tgt=decoder_input,
+                    tgt_mask=tgt_mask,
+                    src_pad_mask=src_padding_mask,
+                    tgt_pad_mask=tgt_padding_mask,  # Try disabling this at inference
+                )
+            last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
+            decoder_input[:, t] = last_logits.argmax(-1)
+            if (decoder_input[:, t] == EOS_token).all():
+                break
+        input_tokens = tokens_to_words(tokens=src_batch, lang=input_lang)
+        translated_tokens = tokens_to_words(tokens=decoder_input, lang=output_lang)
+        print(
+            f'Input: {" ".join(input_tokens[0])}, translated_tokens: {translated_tokens} '
+        )
 
+
+# # TODO: this might be broken, focus on training now
+# @torch.inference_mode()
+# TODO: to use validate for translate
+# def translate(model, src_sentence, output_lang):
+#     src_tokens = input_lang_sentence_to_tokens(
+#         src_sentence=src_sentence, input_lang=input_lang
+#     )
+#     src = PAD_token * torch.ones(
+#         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+#     )  # Shape: (1, 1)
+#     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
+#     src = src.to(device)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -481,7 +536,7 @@ if __name__ == "__main__":
         device=device,
     )
     if not args.eval:
-        train_loss_list, validation_loss_list = fit(
+        train_loss_list = fit(
             model,
             opt,
             loss_fn,
@@ -489,19 +544,21 @@ if __name__ == "__main__":
             epochs=NUM_EPOCHS,
             start_epoch=start_epoch,
         )
-    test_sentences = [
-        "Eres tú",
-        "Eres mala.",
-        "Eres grande.",
-        "Estás triste.",
-        "estoy en el banco",
-        "soy tom",
-        "soy gorda",
-        "estoy en forma",
-        "Estoy trabajando.",
-        "Estoy levantado.",
-        "Estoy de acuerdo.",
-    ]
     model.eval()
-    for test_sentence in test_sentences:
-        translate(model, test_sentence, output_lang)
+    validate(model, train_dataloader)
+    # TODO: to use validate for translate
+    # test_sentences = [
+    #     "Eres tú",
+    #     "Eres mala.",
+    #     "Eres grande.",
+    #     "Estás triste.",
+    #     "estoy en el banco",
+    #     "soy tom",
+    #     "soy gorda",
+    #     "estoy en forma",
+    #     "Estoy trabajando.",
+    #     "Estoy levantado.",
+    #     "Estoy de acuerdo.",
+    # ]
+    # for test_sentence in test_sentences:
+    #     translate(model, test_sentence, output_lang)

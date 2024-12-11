@@ -71,9 +71,13 @@ def test_early_stopping():
 def test_scheduled_probability():
     test_values = [
         # start_p, end_p, d, p
-        [0.8, 0.7, 1.0, 0.8],
-        [0.8, 0.7, 0.0, 0.7],
+        [0.8, 0.7, 0.0, 0.8],
+        [0.8, 0.7, 1.0, 0.7],
     ]
     for start_p, end_p, d, p_expected in test_values:
         p = get_scheduled_probability(start_p, end_p, d)
         assert p == p_expected
+    EPOCH = 300
+    # Put it here for quick visualization
+    ps = [get_scheduled_probability(1.0, 0.4, epoch / EPOCH) for epoch in range(EPOCH)]
+    # print(f'Rico: {ps}')

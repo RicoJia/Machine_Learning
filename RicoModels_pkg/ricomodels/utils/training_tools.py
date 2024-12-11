@@ -90,7 +90,7 @@ def load_model(model_path, model, device):
 
 def get_scheduled_probability(start_p, end_p, d):
     """
-    end_p * (start_p / end_p) ^ d
+    start_p * (end_p / start_p) ^ d
     Args:
         start_p (_type_): starting probability
         end_p (_type_): ending probability
@@ -104,7 +104,7 @@ def get_scheduled_probability(start_p, end_p, d):
     check_in_range(start_p, "start_p")
     check_in_range(end_p, "end_p")
     check_in_range(d, "d")
-    return end_p * (start_p / end_p) ** d
+    return start_p * (end_p / start_p) ** d
 
 
 def clip_gradients(model, gradient_clipped_norm_max):
@@ -113,7 +113,7 @@ def clip_gradients(model, gradient_clipped_norm_max):
     Args:
         model (_type_): _description_
     """
-    need_clipping=False
+    need_clipping = False
     for name, param in model.named_parameters():
         if torch.isinf(param.grad).any():
             print("inf: ", name)
