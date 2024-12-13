@@ -489,6 +489,19 @@ def validate(model, dataloader):
         )
 
 
+# # TODO: this might be broken, focus on training now
+# @torch.inference_mode()
+# TODO: to use validate for translate
+# def translate(model, src_sentence, output_lang):
+#     src_tokens = input_lang_sentence_to_tokens(
+#         src_sentence=src_sentence, input_lang=input_lang
+#     )
+#     src = PAD_token * torch.ones(
+#         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+#     )  # Shape: (1, 1)
+#     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
+#     src = src.to(device)
+
 if __name__ == "__main__":
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -502,6 +515,13 @@ if __name__ == "__main__":
         num_decoder_layers=DECODER_LAYER_NUM,
         dropout_p=0.1,
     ).to(device)
+    # TODO debug
+    # summary(model, 
+    #         [
+    #             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
+    #             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
+    #         ], device=str(device)
+    # )
     opt = optim.AdamW(model.parameters(), lr=1e-4)
     loss_fn = nn.CrossEntropyLoss(ignore_index=PAD_token)
     model, opt, start_epoch = load_model_and_optimizer(
@@ -510,52 +530,23 @@ if __name__ == "__main__":
         path=MODEL_PATH,
         device=device,
     )
-    if not args.eval:
-        fit(
-            model,
-            opt,
-            loss_fn,
-            train_dataloader,
-            epochs=NUM_EPOCHS,
-            start_epoch=start_epoch,
-        )
-    model.eval()
-    validate(model, train_dataloader)
-
-#################################################################
-# Graveyard
-#################################################################
-# TODO debug
-# summary(model, 
-#         [
-#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
-#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
-#         ], device=str(device)
-# )
-# # TODO: this might be broken, focus on training now
-# @torch.inference_mode()
-# TODO: to use validate for translate
-# def translate(model, src_sentence, output_lang):
-#     src_tokens = input_lang_sentence_to_tokens(
-#         src_sentence=src_sentence, input_lang=input_lang
-#     )
-#     src = PAD_token * torch.ones(
-#         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
-#     )  # Shape: (1, 1)
-#     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-#     src = src.to(device)    # TODO: to use validate for translate
-# test_sentences = [
-#     "Eres tú",
-#     "Eres mala.",
-#     "Eres grande.",
-#     "Estás triste.",
-#     "estoy en el banco",
-#     "soy tom",
-#     "soy gorda",
-#     "estoy en forma",
-#     "Estoy trabajando.",
-#     "Estoy levantado.",
-#     "Estoy de acuerdo.",
-# ]
-# for test_sentence in test_sentences:
-#     translate(model, test_sentence, output_lang)
+    if not args.eval:            # for token in tgt:
+            #     token_idx = token.item()
+            #     word = output_lang.index2word.get(token_idx, "<unk>")
+            #     tgt_tokens.append(word)er)
+    # TODO: to use validate for translate
+    # test_sentences = [
+    #     "Eres tú",
+    #     "Eres mala.",
+    #     "Eres grande.",
+    #     "Estás triste.",
+    #     "estoy en el banco",
+    #     "soy tom",
+    #     "soy gorda",
+    #     "estoy en forma",
+    #     "Estoy trabajando.",
+    #     "Estoy levantado.",
+    #     "Estoy de acuerdo.",
+    # ]
+    # for test_sentence in test_sentences:
+    #     translate(model, test_sentence, output_lang)
