@@ -12,11 +12,12 @@ class OGPositionalEncoder(torch.nn.Module):
         two_j = torch.arange(start=0, end=embedding_size) // 2 * 2
         # shape: [max_sentence_length, embedding_size]
         angles = pos / (10000 ** (two_j / embedding_size))
-        self.positional_embedding = torch.zeros(
+        positional_embedding = torch.zeros(
             (1, max_sentence_length, embedding_size)
         )
-        self.positional_embedding[:, :, 0::2] = torch.sin(angles[:, 0::2])
-        self.positional_embedding[:, :, 1::2] = torch.cos(angles[:, 1::2])
+        positional_embedding[:, :, 0::2] = torch.sin(angles[:, 0::2])
+        positional_embedding[:, :, 1::2] = torch.cos(angles[:, 1::2])
+        self.register_buffer("positional_embedding", positional_embedding)
 
     def forward(self, X):
         # X: [Batch_Size, Time (sentence length), Channels (embeddings)]

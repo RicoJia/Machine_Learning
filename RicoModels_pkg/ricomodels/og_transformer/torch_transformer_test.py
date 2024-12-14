@@ -67,10 +67,7 @@ class PositionalEncoding(nn.Module):
         # Modified version from: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
         # max_len determines how far the position can have an effect on a token (window)
 
-        # Info
         self.dropout = nn.Dropout(dropout_p)
-
-        # Encoding - From formula
         pos_encoding = torch.zeros(max_len, dim_model)
         positions_list = torch.arange(0, max_len, dtype=torch.float).view(
             -1, 1
@@ -78,13 +75,10 @@ class PositionalEncoding(nn.Module):
         division_term = torch.exp(
             torch.arange(0, dim_model, 2).float() * (-math.log(10000.0)) / dim_model
         )  # 1000^(2i/dim_model)
-
         # PE(pos, 2i) = sin(pos/1000^(2i/dim_model))
         pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
-
         # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
         pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
-
         # Saving buffer (same as parameter without gradients needed)
         pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1)
         self.register_buffer("pos_encoding", pos_encoding)
@@ -101,8 +95,6 @@ class Transformer(nn.Module):
     Model from "A detailed guide to Pytorch's nn.Transformer() module.", by
     Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
     """
-
-    # Constructor
     def __init__(
         self,
         input_token_size,
@@ -133,15 +125,16 @@ class Transformer(nn.Module):
         nn.init.xavier_uniform_(self.encoder_embedding.weight)
         nn.init.xavier_uniform_(self.decoder_embedding.weight)
 
-    def forward(self, src, tgt, tgt_mask=None, src_pad_mask=None, tgt_pad_mask=None):
+    def forward(self, src: torch.Tensor, tgt: torch.Tensor, 
+                tgt_mask: torch.Tensor = None, src_pad_mask: torch.Tensor=None, tgt_pad_mask: torch.Tensor=None):
         """Training Function of this Transformer wrapper
 
         Args:
-            src (_type_): (batch_size, src sequence length)
-            tgt (_type_): (batch_size, tgt sequence length)
-            tgt_mask (_type_, optional): (sequence length, sequence length)
-            src_pad_mask (_type_, optional): (batch_size, src sequence length)
-            tgt_pad_mask (_type_, optional): (batch_size, src sequence length)
+            src (torch.Tensor): (batch_size, src sequence length)
+            tgt (torch.Tensor): (batch_size, tgt sequence length)
+            tgt_mask (torch.Tensor, optional): (sequence length, sequence length)
+            src_pad_mask (torch.Tensor, optional): (batch_size, src sequence length)
+            tgt_pad_mask (torch.Tensor, optional): (batch_size, src sequence length)
 
         Returns:
             Logits: (batch_size, sequence length, num_tokens)
@@ -489,19 +482,6 @@ def validate(model, dataloader):
         )
 
 
-# # TODO: this might be broken, focus on training now
-# @torch.inference_mode()
-# TODO: to use validate for translate
-# def translate(model, src_sentence, output_lang):
-#     src_tokens = input_lang_sentence_to_tokens(
-#         src_sentence=src_sentence, input_lang=input_lang
-#     )
-#     src = PAD_token * torch.ones(
-#         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
-#     )  # Shape: (1, 1)
-#     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-#     src = src.to(device)
-
 if __name__ == "__main__":
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -515,13 +495,6 @@ if __name__ == "__main__":
         num_decoder_layers=DECODER_LAYER_NUM,
         dropout_p=0.1,
     ).to(device)
-    # TODO debug
-    # summary(model, 
-    #         [
-    #             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
-    #             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
-    #         ], device=str(device)
-    # )
     opt = optim.AdamW(model.parameters(), lr=1e-4)
     loss_fn = nn.CrossEntropyLoss(ignore_index=PAD_token)
     model, opt, start_epoch = load_model_and_optimizer(
@@ -530,23 +503,52 @@ if __name__ == "__main__":
         path=MODEL_PATH,
         device=device,
     )
-    if not args.eval:            # for token in tgt:
-            #     token_idx = token.item()
-            #     word = output_lang.index2word.get(token_idx, "<unk>")
-            #     tgt_tokens.append(word)er)
-    # TODO: to use validate for translate
-    # test_sentences = [
-    #     "Eres tú",
-    #     "Eres mala.",
-    #     "Eres grande.",
-    #     "Estás triste.",
-    #     "estoy en el banco",
-    #     "soy tom",
-    #     "soy gorda",
-    #     "estoy en forma",
-    #     "Estoy trabajando.",
-    #     "Estoy levantado.",
-    #     "Estoy de acuerdo.",
-    # ]
-    # for test_sentence in test_sentences:
-    #     translate(model, test_sentence, output_lang)
+    if not args.eval:
+        fit(
+            model,
+            opt,
+            loss_fn,
+            train_dataloader,
+            epochs=NUM_EPOCHS,
+            start_epoch=start_epoch,
+        )
+    model.eval()
+    validate(model, train_dataloader)
+
+#################################################################
+# Graveyard
+#################################################################
+# TODO debug
+# summary(model, 
+#         [
+#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
+#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
+#         ], device=str(device)
+# )
+# # TODO: this might be broken, focus on training now
+# @torch.inference_mode()
+# TODO: to use validate for translate
+# def translate(model, src_sentence, output_lang):
+#     src_tokens = input_lang_sentence_to_tokens(
+#         src_sentence=src_sentence, input_lang=input_lang
+#     )
+#     src = PAD_token * torch.ones(
+#         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+#     )  # Shape: (1, 1)
+#     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
+#     src = src.to(device)    # TODO: to use validate for translate
+# test_sentences = [
+#     "Eres tú",
+#     "Eres mala.",
+#     "Eres grande.",
+#     "Estás triste.",
+#     "estoy en el banco",
+#     "soy tom",
+#     "soy gorda",
+#     "estoy en forma",
+#     "Estoy trabajando.",
+#     "Estoy levantado.",
+#     "Estoy de acuerdo.",
+# ]
+# for test_sentence in test_sentences:
+#     translate(model, test_sentence, output_lang)
