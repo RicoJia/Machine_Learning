@@ -38,9 +38,9 @@ DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
 ENCODER_LAYER_NUM = 2
 DECODER_LAYER_NUM = 2
-NUM_EPOCHS = 900
+NUM_EPOCHS = 900  # TODO
 GRADIENT_CLIPPED_NORM_MAX = 5.0
-TEACHER_FORCING_RATIO_MIN = 1.0
+TEACHER_FORCING_RATIO_MIN = 0.2
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
 INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
@@ -79,7 +79,7 @@ class PositionalEncoding(nn.Module):
         pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
         # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
         pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
-        # Saving buffer (same as parameter without gradients needed)
+        # TODO: is this a bug?
         pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1)
         self.register_buffer("pos_encoding", pos_encoding)
 
@@ -95,6 +95,7 @@ class Transformer(nn.Module):
     Model from "A detailed guide to Pytorch's nn.Transformer() module.", by
     Daniel Melchor: https://medium.com/@danielmelchor/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
     """
+
     def __init__(
         self,
         input_token_size,
@@ -125,8 +126,14 @@ class Transformer(nn.Module):
         nn.init.xavier_uniform_(self.encoder_embedding.weight)
         nn.init.xavier_uniform_(self.decoder_embedding.weight)
 
-    def forward(self, src: torch.Tensor, tgt: torch.Tensor, 
-                tgt_mask: torch.Tensor = None, src_pad_mask: torch.Tensor=None, tgt_pad_mask: torch.Tensor=None):
+    def forward(
+        self,
+        src: torch.Tensor,
+        tgt: torch.Tensor,
+        tgt_mask: torch.Tensor = None,
+        src_pad_mask: torch.Tensor = None,
+        tgt_pad_mask: torch.Tensor = None,
+    ):
         """Training Function of this Transformer wrapper
 
         Args:
@@ -224,43 +231,45 @@ def train_with_teacher_enforcing(
     all_output_logits = PAD_token * torch.ones(
         (src_batch.size(0), MAX_SENTENCE_LENGTH, OUTPUT_TOKEN_SIZE), device=device
     )
-    for t in range(0, MAX_SENTENCE_LENGTH):
-        tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
-            src_batch, decoder_input, device=device
-        )
-        if last_output is not None and random.random() > teacher_forcing_ratio:
-            # TODO: without this clone(), the embedding layer would expect a version lower than this
-            # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
-            # So let's keep it for now
-            decoder_input = decoder_input.clone()
-            decoder_input[:, t] = last_output.detach()
-        # [batch size, t, output_vocab_dim]
-        logits = model(
-            src=src_batch,  # [batch size, max_length]
-            tgt=decoder_input,  # [batch size, t]
-            tgt_mask=tgt_mask,  # 99, 99
-            src_pad_mask=src_padding_mask,
-            tgt_pad_mask=tgt_padding_mask,
-        )
-        last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
-        last_output = last_logits.argmax(
-            -1
-        )  # this won't change decoder_input's version
-        all_output_logits[:, t, :] = last_logits  # length: max_sentence_length - 1
+    with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
+        for t in range(0, MAX_SENTENCE_LENGTH):
+            tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
+                src_batch, decoder_input, device=device
+            )
+            if last_output is not None and random.random() > teacher_forcing_ratio:
+                # TODO: without this clone(), the embedding layer would expect a version lower than this
+                # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
+                # So let's keep it for now
+                decoder_input = decoder_input.clone()
+                decoder_input[:, t] = last_output.detach()
+            # [batch size, t, output_vocab_dim]
+            logits = model(
+                src=src_batch,  # [batch size, max_length]
+                tgt=decoder_input,  # [batch size, t]
+                tgt_mask=tgt_mask,  # 99, 99
+                src_pad_mask=src_padding_mask,
+                tgt_pad_mask=tgt_padding_mask,
+            )
+            # THIS IS A BUG, logits[-1] never makes sense!!!!!!!!!!
+            last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
+            last_output = last_logits.argmax(
+                -1
+            )  # this won't change decoder_input's version
+            all_output_logits[:, t, :] = last_logits  # length: max_sentence_length - 1
 
-        # check if <EOS> appears across the entire batch
-        if TERMINATE_TRAINING_UPON_EOS:
-            if_EOS_across_batch |= last_output == EOS_token
-            if if_EOS_across_batch.all():
-                break
-    loss = criterion(
-        all_output_logits.reshape(
-            -1, logits.size(-1)
-        ),  # (batch_size * sequence length, output_token_dim)
-        tgt_batch.reshape(
-            -1
-        ),  # tgt_batch is ((batch_size-1) * sequence length). Need to take the first one out because we are not considering SOS now
-    )
+            # check if <EOS> appears across the entire batch
+            if TERMINATE_TRAINING_UPON_EOS:
+                if_EOS_across_batch |= last_output == EOS_token
+                if if_EOS_across_batch.all():
+                    break
+        loss = criterion(
+            all_output_logits.reshape(
+                -1, logits.size(-1)
+            ),  # (batch_size * sequence length, output_token_dim)
+            tgt_batch.reshape(
+                -1
+            ),  # tgt_batch is ((batch_size-1) * sequence length). Need to take the first one out because we are not considering SOS now
+        )
     if args.debug:
         training_logits_to_outuput_sentence(
             logits_batch=all_output_logits, tgt_batch=tgt_batch, output_lang=output_lang
@@ -350,7 +359,6 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
     ]
 
     for epoch in range(start_epoch, epochs):
-        # TODO: think more
         torch.cuda.empty_cache()
         print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
 
@@ -371,7 +379,9 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
                 opt,
                 loss_fn,
                 train_dataloader,
-                teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
+                # TODO
+                # teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
+                teacher_forcing_ratio=0.5,
             )
             prof.step()
 
@@ -452,6 +462,7 @@ def validate(model, dataloader):
     for i, (src_batch, tgt_batch) in enumerate(dataloader):
         tgt_batch = tgt_batch.to(device)
         src_batch = src_batch.to(device)
+        # TODO: this is a "semi-bug", but we are not getting the last token
         decoder_input = PAD_token * torch.ones(
             (src_batch.size(0), MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
         )  # Shape: (1, 1)
@@ -471,15 +482,17 @@ def validate(model, dataloader):
                     src_pad_mask=src_padding_mask,
                     tgt_pad_mask=tgt_padding_mask,  # Try disabling this at inference
                 )
-            last_logits = logits[:, -1, :]  # [batch_size, output_vocab_dim]
+            last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
             decoder_input[:, t] = last_logits.argmax(-1)
             # if (decoder_input[:, t] == EOS_token).all():
             #     break
         output_tokens = tokens_to_words(tokens=tgt_batch, lang=output_lang)
         translated_tokens = tokens_to_words(tokens=decoder_input, lang=output_lang)
-        print(
-            f'==== \n Input: {[" ".join(o) for o in output_tokens]}, \n translated_tokens: {translated_tokens} '
-        )
+        target_tokens = [" ".join(o) for o in output_tokens]
+
+        print(f" ==== \n")
+        for tr, ta in zip(translated_tokens, target_tokens):
+            print(f"Input: {ta}, \n translated_tokens: {tr} ")
 
 
 if __name__ == "__main__":
@@ -519,10 +532,10 @@ if __name__ == "__main__":
 # Graveyard
 #################################################################
 # TODO debug
-# summary(model, 
+# summary(model,
 #         [
-#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
-#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long), 
+#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long),
+#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long),
 #         ], device=str(device)
 # )
 # # TODO: this might be broken, focus on training now

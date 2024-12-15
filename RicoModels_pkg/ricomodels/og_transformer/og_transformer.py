@@ -6,23 +6,23 @@ from matplotlib import pyplot as plt
 
 
 class OGPositionalEncoder(torch.nn.Module):
-    def __init__(self, max_sentence_length, embedding_size):
+    def __init__(self, max_sentence_length, embedding_size, dropout=0.1):
         super().__init__()
         pos = torch.arange(start=0, end=max_sentence_length).unsqueeze(1)
         two_j = torch.arange(start=0, end=embedding_size) // 2 * 2
         # shape: [max_sentence_length, embedding_size]
         angles = pos / (10000 ** (two_j / embedding_size))
-        positional_embedding = torch.zeros(
-            (1, max_sentence_length, embedding_size)
-        )
+        positional_embedding = torch.zeros((1, max_sentence_length, embedding_size))
         positional_embedding[:, :, 0::2] = torch.sin(angles[:, 0::2])
         positional_embedding[:, :, 1::2] = torch.cos(angles[:, 1::2])
+        self.dropout = torch.nn.Dropout(p=dropout)
         self.register_buffer("positional_embedding", positional_embedding)
 
     def forward(self, X):
         # X: [Batch_Size, Time (sentence length), Channels (embeddings)]
         sentence_length = X.shape[1]
         X += self.positional_embedding[:, :sentence_length, :].to(X.device)
+        X = self.dropout(X)
         return X
 
 
@@ -366,6 +366,8 @@ class Decoder(torch.nn.Module):
             lookahead_mask : [num_queries, num_keys]
             key_padding_mask : [batch_size, num_keys]
         """
+        # TODO: first sub decoder layer should use an attn_mask.
+
         #  [batch_size, output_sentences_length]
         X = self.embedding_converter(X)
         X *= math.sqrt(float(self.embedding_dim))
@@ -375,6 +377,7 @@ class Decoder(torch.nn.Module):
         enc_output = enc_output.permute(1, 0, 2)
         # [num_keys, batch_size, qk_dim]
         decoder_self_attns, decoder_encoder_attns = [], []
+        # TODO: the first layer uses attn_mask.
         for decoder_layer in self.dec_layers:
             X, decoder_self_attn, decoder_encoder_attn = decoder_layer(
                 X,
