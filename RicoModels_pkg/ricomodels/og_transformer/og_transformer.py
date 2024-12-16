@@ -21,7 +21,8 @@ class OGPositionalEncoder(torch.nn.Module):
     def forward(self, X):
         # X: [Batch_Size, Time (sentence length), Channels (embeddings)]
         sentence_length = X.shape[1]
-        X += self.positional_embedding[:, :sentence_length, :].to(X.device)
+        # TODO .to(X.device) is redundant if the model has been moved there already?
+        X += self.positional_embedding[:, :sentence_length, :]
         X = self.dropout(X)
         return X
 

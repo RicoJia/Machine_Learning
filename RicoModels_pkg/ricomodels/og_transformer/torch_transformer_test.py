@@ -30,7 +30,7 @@ from ricomodels.utils.visualization import TrainingTimer
 from torchsummary import summary
 
 EFFECTIVE_BATCH_SIZE = 32
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 ACCUMULATION_STEPS = int(EFFECTIVE_BATCH_SIZE / BATCH_SIZE)
 EMBEDDING_DIM = 32
 NUM_HEADS = 8
@@ -38,9 +38,9 @@ DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
 ENCODER_LAYER_NUM = 2
 DECODER_LAYER_NUM = 2
-NUM_EPOCHS = 900  # TODO
+NUM_EPOCHS = 1500 
 GRADIENT_CLIPPED_NORM_MAX = 5.0
-TEACHER_FORCING_RATIO_MIN = 0.2
+TEACHER_FORCING_RATIO_MIN = 0.0
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
 INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
@@ -61,33 +61,27 @@ def parse_args():
     return args
 
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, dim_model, dropout_p, max_len):
+class OGPositionalEncoder(torch.nn.Module):
+    def __init__(self, max_sentence_length, embedding_size, dropout=0.1):
         super().__init__()
-        # Modified version from: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
-        # max_len determines how far the position can have an effect on a token (window)
+        pos = torch.arange(
+            start=0, end=max_sentence_length, dtype=torch.float
+        ).unsqueeze(1)
+        two_j = torch.arange(start=0, end=embedding_size, dtype=torch.float) // 2 * 2
+        # shape: [max_sentence_length, embedding_size]
+        angles = pos / (10000 ** (two_j / embedding_size))
+        positional_embedding = torch.zeros((1, max_sentence_length, embedding_size))
+        positional_embedding[:, :, 0::2] = torch.sin(angles[:, 0::2])
+        positional_embedding[:, :, 1::2] = torch.cos(angles[:, 1::2])
+        self.dropout = torch.nn.Dropout(p=dropout)
+        self.register_buffer("positional_embedding", positional_embedding)
 
-        self.dropout = nn.Dropout(dropout_p)
-        pos_encoding = torch.zeros(max_len, dim_model)
-        positions_list = torch.arange(0, max_len, dtype=torch.float).view(
-            -1, 1
-        )  # 0, 1, 2, 3, 4, 5
-        division_term = torch.exp(
-            torch.arange(0, dim_model, 2).float() * (-math.log(10000.0)) / dim_model
-        )  # 1000^(2i/dim_model)
-        # PE(pos, 2i) = sin(pos/1000^(2i/dim_model))
-        pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
-        # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
-        pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
-        # TODO: is this a bug?
-        pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1)
-        self.register_buffer("pos_encoding", pos_encoding)
-
-    def forward(self, token_embedding: torch.tensor) -> torch.tensor:
-        # Residual connection + pos encoding
-        return self.dropout(
-            token_embedding + self.pos_encoding[: token_embedding.size(0), :]
-        )
+    def forward(self, X):
+        # X: [Batch_Size, Time (sentence length), Channels (embeddings)]
+        sentence_length = X.shape[1]
+        X += self.positional_embedding[:, :sentence_length, :]
+        X = self.dropout(X)
+        return X
 
 
 class Transformer(nn.Module):
@@ -110,8 +104,10 @@ class Transformer(nn.Module):
 
         self.model_type = "Transformer"
         self.dim_model = dim_model
-        self.positional_encoder = PositionalEncoding(
-            dim_model=dim_model, dropout_p=dropout_p, max_len=MAX_SENTENCE_LENGTH
+        self.positional_encoder = OGPositionalEncoder(
+            max_sentence_length=MAX_SENTENCE_LENGTH,
+            embedding_size=dim_model,
+            dropout=dropout_p,
         )
         self.encoder_embedding = nn.Embedding(input_token_size, dim_model)
         self.decoder_embedding = nn.Embedding(input_token_size, dim_model)
@@ -250,7 +246,6 @@ def train_with_teacher_enforcing(
                 src_pad_mask=src_padding_mask,
                 tgt_pad_mask=tgt_padding_mask,
             )
-            # THIS IS A BUG, logits[-1] never makes sense!!!!!!!!!!
             last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
             last_output = last_logits.argmax(
                 -1
@@ -308,7 +303,6 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
                     teacher_forcing_ratio=teacher_forcing_ratio,
                     criterion=criterion,
                 )
-                # effective_batch_loss = batch_loss / ACCUMULATION_STEPS
                 effective_batch_loss = batch_loss / ACCUMULATION_STEPS
 
                 # calculate gradients
@@ -347,7 +341,7 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
             encoder_layer_num=ENCODER_LAYER_NUM,
             decoder_layer_num=DECODER_LAYER_NUM,
             num_epochs=NUM_EPOCHS,
-            teacher_forcing_ratio_min=0.4,
+            teacher_forcing_ratio_min=TEACHER_FORCING_RATIO_MIN,
         )
     )
     timer = TrainingTimer()
@@ -362,7 +356,6 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
         torch.cuda.empty_cache()
         print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
 
-        # TODO: where is this saved to?
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -379,9 +372,7 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
                 opt,
                 loss_fn,
                 train_dataloader,
-                # TODO
-                # teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
-                teacher_forcing_ratio=0.5,
+                teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
             )
             prof.step()
 
@@ -444,7 +435,6 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
                 [ys, torch.tensor([[next_word]], device=device)], dim=1
             )  # Shape: (1, tgt_seq_len + 1)
 
-        # TODO: this might break
         translated_tokens = tokens_to_words(tokens=ys, lang=output_lang)
         tgt_tokens = []
         try:
@@ -462,7 +452,7 @@ def validate(model, dataloader):
     for i, (src_batch, tgt_batch) in enumerate(dataloader):
         tgt_batch = tgt_batch.to(device)
         src_batch = src_batch.to(device)
-        # TODO: this is a "semi-bug", but we are not getting the last token
+        # TODO: this is a "semi-bug" - we are not getting the last token
         decoder_input = PAD_token * torch.ones(
             (src_batch.size(0), MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
         )  # Shape: (1, 1)
@@ -484,8 +474,6 @@ def validate(model, dataloader):
                 )
             last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
             decoder_input[:, t] = last_logits.argmax(-1)
-            # if (decoder_input[:, t] == EOS_token).all():
-            #     break
         output_tokens = tokens_to_words(tokens=tgt_batch, lang=output_lang)
         translated_tokens = tokens_to_words(tokens=decoder_input, lang=output_lang)
         target_tokens = [" ".join(o) for o in output_tokens]
@@ -538,9 +526,7 @@ if __name__ == "__main__":
 #             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long),
 #         ], device=str(device)
 # )
-# # TODO: this might be broken, focus on training now
 # @torch.inference_mode()
-# TODO: to use validate for translate
 # def translate(model, src_sentence, output_lang):
 #     src_tokens = input_lang_sentence_to_tokens(
 #         src_sentence=src_sentence, input_lang=input_lang
@@ -549,7 +535,7 @@ if __name__ == "__main__":
 #         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
 #     )  # Shape: (1, 1)
 #     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-#     src = src.to(device)    # TODO: to use validate for translate
+#     src = src.to(device)
 # test_sentences = [
 #     "Eres tú",
 #     "Eres mala.",
