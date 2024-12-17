@@ -46,7 +46,6 @@ def validate_model(model, val_loader, device, criterion):
 
 
 def load_model_and_optimizer(model, optimizer, path, device):
-    # TODO Remember to remove
     print(f"Rico: model_path: {path}")
     if os.path.exists(path):
         checkpoint = torch.load(path, map_location=device)
@@ -101,6 +100,9 @@ def get_scheduled_probability(start_p, end_p, d):
         if var < 0.0 or var > 1.0:
             raise ValueError(f"{var_name} must be in [0, 1], but it got value {var}")
 
+    # TODO This is hacky
+    if end_p < 0.0001:
+        end_p = 0.0001
     check_in_range(start_p, "start_p")
     check_in_range(end_p, "end_p")
     check_in_range(d, "d")

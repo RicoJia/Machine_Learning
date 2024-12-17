@@ -80,4 +80,3 @@ def test_scheduled_probability():
     EPOCH = 300
     # Put it here for quick visualization
     ps = [get_scheduled_probability(1.0, 0.4, epoch / EPOCH) for epoch in range(EPOCH)]
-    # print(f'Rico: {ps}')

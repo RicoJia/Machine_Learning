@@ -21,7 +21,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SOS_token = 1
 EOS_token = 2
 PAD_token = 0
-MAX_LENGTH = 10
+MAX_LENGTH = 30
 
 
 # Turn a Unicode string to plain ASCII, thanks to

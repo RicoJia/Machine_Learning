@@ -14,6 +14,7 @@ from ricomodels.seq2seq.dataload_seq2seq import (
     SOS_token,
     MAX_LENGTH,
     PAD_token,
+    input_lang_sentence_to_tokens,
 )
 from ricomodels.utils.data_loading import get_package_dir
 from ricomodels.og_transformer.translator_transformer import (
@@ -26,19 +27,18 @@ import math
 import numpy as np
 from tqdm import tqdm
 import wandb
-from ricomodels.utils.visualization import TrainingTimer
-from torchsummary import summary
+from ricomodels.utils.visualization import TrainingTimer, model_summary
+from typing import List
 
-EFFECTIVE_BATCH_SIZE = 32
-BATCH_SIZE = 16
+EFFECTIVE_BATCH_SIZE = 256
+BATCH_SIZE = 64
 ACCUMULATION_STEPS = int(EFFECTIVE_BATCH_SIZE / BATCH_SIZE)
-EMBEDDING_DIM = 32
+EMBEDDING_DIM = 64
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
-ENCODER_LAYER_NUM = 2
-DECODER_LAYER_NUM = 2
-NUM_EPOCHS = 3000
+ENCODER_DECODER_LAYER_NUM = 5
+NUM_EPOCHS = 300
 GRADIENT_CLIPPED_NORM_MAX = 5.0
 TEACHER_FORCING_RATIO_MIN = 0.0
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
@@ -46,10 +46,11 @@ INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
 # Not recommended, because in certain predictions, EOS might yield the same loss as wrong predictions.
 TERMINATE_TRAINING_UPON_EOS = False
+WEIGHT_TYING = False
 MODEL_PATH = os.path.join(
     get_package_dir(),
     "og_transformer",
-    f"spanish2english_{MAX_SENTENCE_LENGTH}tokens_{EMBEDDING_DIM}dim.pth",
+    f"spanish2english_{MAX_SENTENCE_LENGTH}tokens_{EMBEDDING_DIM}dim_{ENCODER_DECODER_LAYER_NUM}layers_{'w' if WEIGHT_TYING else 'nw'}.pth",
 )
 
 
@@ -57,8 +58,50 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", "-e", action="store_true", default=False)
     parser.add_argument("--debug", "-d", action="store_true", default=False)
+    parser.add_argument("--custom", "-c", action="store_true", default=False)
+    parser.add_argument("--summary", "-s", action="store_true", default=False)
     args = parser.parse_args()
     return args
+
+
+def generate_square_subsequent_mask(sz):
+    """
+    EX for size=5:
+    [[0., -inf, -inf, -inf, -inf],
+     [0.,   0., -inf, -inf, -inf],
+     [0.,   0.,   0., -inf, -inf],
+     [0.,   0.,   0.,   0., -inf],
+     [0.,   0.,   0.,   0.,   0.]]
+    """
+    mask = torch.triu(torch.ones(sz, sz, device=device) * -1e9, diagonal=1).bool()
+    return mask
+
+
+def create_mask_on_device(src, tgt, device):
+    """Create masks optionally on the current chosen device
+
+    Args:
+        src (_type_): _description_
+        tgt (_type_): _description_
+        device (_type_): _description_
+
+    Returns:
+        tgt_mask (optional) look ahead mask
+        src_padding_mask: padding mask that masks out padding in src
+        tgt_padding_mask (optional) padding mask if tgt is specified
+    """
+    # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
+    # [False, False, False, True, True, True]
+    src_padding_mask = (src == PAD_token).to(device)
+    if tgt is not None:
+        tgt_padding_mask = (tgt == PAD_token).to(device)
+        tgt_seq_len = tgt.size(1)
+        # 0 = unmask
+        tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
+    else:
+        tgt_padding_mask = None
+        tgt_mask = None
+    return tgt_mask, src_padding_mask, tgt_padding_mask
 
 
 class OGPositionalEncoder(torch.nn.Module):
@@ -109,8 +152,14 @@ class Transformer(nn.Module):
             embedding_size=dim_model,
             dropout=dropout_p,
         )
-        self.encoder_embedding = nn.Embedding(input_token_size, dim_model)
-        self.decoder_embedding = nn.Embedding(input_token_size, dim_model)
+        if WEIGHT_TYING:
+            self.encoder_decoder_embedding = nn.Embedding(input_token_size, dim_model)
+            nn.init.xavier_uniform_(self.encoder_decoder_embedding.weight)
+        else:
+            self.encoder_embedding = nn.Embedding(input_token_size, dim_model)
+            nn.init.xavier_uniform_(self.encoder_embedding.weight)
+            self.decoder_embedding = nn.Embedding(output_token_size, dim_model)
+            nn.init.xavier_uniform_(self.decoder_embedding.weight)
         self.transformer = nn.Transformer(
             d_model=dim_model,
             nhead=num_heads,
@@ -119,16 +168,11 @@ class Transformer(nn.Module):
             dropout=dropout_p,
         )
         self.out = nn.Linear(dim_model, output_token_size)
-        nn.init.xavier_uniform_(self.encoder_embedding.weight)
-        nn.init.xavier_uniform_(self.decoder_embedding.weight)
 
     def forward(
         self,
         src: torch.Tensor,
         tgt: torch.Tensor,
-        tgt_mask: torch.Tensor = None,
-        src_pad_mask: torch.Tensor = None,
-        tgt_pad_mask: torch.Tensor = None,
     ):
         """Training Function of this Transformer wrapper
 
@@ -142,9 +186,16 @@ class Transformer(nn.Module):
         Returns:
             Logits: (batch_size, sequence length, num_tokens)
         """
+        tgt_mask, src_pad_mask, tgt_pad_mask = create_mask_on_device(
+            src, tgt, device=device
+        )
         # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
-        src = self.encoder_embedding(src) * math.sqrt(self.dim_model)
-        tgt = self.decoder_embedding(tgt) * math.sqrt(self.dim_model)
+        if WEIGHT_TYING:
+            src = self.encoder_decoder_embedding(src) * math.sqrt(self.dim_model)
+            tgt = self.encoder_decoder_embedding(tgt) * math.sqrt(self.dim_model)
+        else:
+            src = self.encoder_embedding(src) * math.sqrt(self.dim_model)
+            tgt = self.decoder_embedding(tgt) * math.sqrt(self.dim_model)
         src = self.positional_encoder(src)
         tgt = self.positional_encoder(tgt)
 
@@ -170,46 +221,6 @@ class Transformer(nn.Module):
         return out
 
 
-def generate_square_subsequent_mask(sz):
-    """
-    EX for size=5:
-    [[0., -inf, -inf, -inf, -inf],
-     [0.,   0., -inf, -inf, -inf],
-     [0.,   0.,   0., -inf, -inf],
-     [0.,   0.,   0.,   0., -inf],
-     [0.,   0.,   0.,   0.,   0.]]
-    """
-    mask = torch.triu(torch.ones(sz, sz, device=device) * -1e9, diagonal=1).bool()
-    return mask
-
-
-def create_mask_on_device(src, tgt, device):
-    """Create masks optionally on the current chosen device
-
-    Args:
-        src (_type_): _description_
-        tgt (_type_): _description_
-        device (_type_): _description_
-
-    Returns:
-        tgt_mask (optional) look ahead mask
-        src_padding_mask: padding mask that masks out padding in src
-        tgt_padding_mask (optional) padding mask if tgt is specified
-    """
-    # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
-    # [False, False, False, True, True, True]
-    src_padding_mask = (src == PAD_token).to(device)
-    if tgt is not None:
-        tgt_padding_mask = (tgt == PAD_token).to(device)
-        tgt_seq_len = tgt.size(1)
-        # 0 = unmask
-        tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
-    else:
-        tgt_padding_mask = None
-        tgt_mask = None
-    return tgt_mask, src_padding_mask, tgt_padding_mask
-
-
 ###############################################################################
 # Training Functions
 ###############################################################################
@@ -229,9 +240,6 @@ def train_with_teacher_enforcing(
     )
     with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
         for t in range(0, MAX_SENTENCE_LENGTH):
-            tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
-                src_batch, decoder_input, device=device
-            )
             if last_output is not None and random.random() > teacher_forcing_ratio:
                 # TODO: without this clone(), the embedding layer would expect a version lower than this
                 # I still don't understand why. Have tried: using clone(), with torch.no_grad(), setting decoder_input.requires_grad = False
@@ -242,9 +250,6 @@ def train_with_teacher_enforcing(
             logits = model(
                 src=src_batch,  # [batch size, max_length]
                 tgt=decoder_input,  # [batch size, t]
-                tgt_mask=tgt_mask,  # 99, 99
-                src_pad_mask=src_padding_mask,
-                tgt_pad_mask=tgt_padding_mask,
             )
             last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
             last_output = last_logits.argmax(
@@ -338,8 +343,8 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
             embedding_dim=EMBEDDING_DIM,
             num_heads=NUM_HEADS,
             max_sentence_length=MAX_SENTENCE_LENGTH,
-            encoder_layer_num=ENCODER_LAYER_NUM,
-            decoder_layer_num=DECODER_LAYER_NUM,
+            encoder_layer_num=ENCODER_DECODER_LAYER_NUM,
+            decoder_layer_num=ENCODER_DECODER_LAYER_NUM,
             num_epochs=NUM_EPOCHS,
             teacher_forcing_ratio_min=TEACHER_FORCING_RATIO_MIN,
         )
@@ -356,25 +361,25 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
         torch.cuda.empty_cache()
         print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
 
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-            schedule=torch.profiler.schedule(wait=1, warmup=1, active=3),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler("./log"),
-            record_shapes=True,
-            profile_memory=True,
-            with_stack=True,
-        ) as prof:
-            train_loss = train_epoch(
-                model,
-                opt,
-                loss_fn,
-                train_dataloader,
-                teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
-            )
-            prof.step()
+        # with torch.profiler.profile(
+        #     activities=[
+        #         torch.profiler.ProfilerActivity.CPU,
+        #         torch.profiler.ProfilerActivity.CUDA,
+        #     ],
+        #     schedule=torch.profiler.schedule(wait=1, warmup=1, active=3),
+        #     on_trace_ready=torch.profiler.tensorboard_trace_handler("./log"),
+        #     record_shapes=True,
+        #     profile_memory=True,
+        #     with_stack=True,
+        # ) as prof:
+        train_loss = train_epoch(
+            model,
+            opt,
+            loss_fn,
+            train_dataloader,
+            teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
+        )
+        # prof.step()
 
         print(f"Training loss: {train_loss:.4f} \n")
         wandb_logger.log(
@@ -395,7 +400,7 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
 ###############################################################################
 
 
-def tokens_to_words(tokens: torch.Tensor, lang: Lang):
+def tokens_to_words(tokens: torch.Tensor, lang: Lang) -> List[List[str]]:
     """Convert a batch of tokens to words
 
     Args:
@@ -447,40 +452,60 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
         )
 
 
+def src_batch_to_translated_tokens(src_batch: torch.Tensor) -> List[List[str]]:
+    """Translate a batch of input tokens to a list of output tokens
+
+    Args:
+        src_batch (torch.Tensor): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    src_batch = src_batch.to(device)
+    # TODO: this is a "semi-bug" - we are not getting the last token
+    decoder_input = PAD_token * torch.ones(
+        (src_batch.size(0), MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+    )  # Shape: (1, 1)
+    decoder_input[:, 0] = SOS_token
+    decoder_input = decoder_input.to(device)
+    for t in range(1, MAX_SENTENCE_LENGTH):
+        # Only pass the portion of ys that we have generated so far
+        with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
+            # Run the model with the truncated ys
+            logits = model(
+                src=src_batch,
+                tgt=decoder_input,
+            )
+        last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
+        decoder_input[:, t] = last_logits.argmax(-1)
+    translated_tokens = tokens_to_words(tokens=decoder_input, lang=output_lang)
+    return translated_tokens
+
+
 @torch.inference_mode()
 def validate(model, dataloader):
     for i, (src_batch, tgt_batch) in enumerate(dataloader):
+        translated_tokens = src_batch_to_translated_tokens(src_batch=src_batch)
         tgt_batch = tgt_batch.to(device)
-        src_batch = src_batch.to(device)
-        # TODO: this is a "semi-bug" - we are not getting the last token
-        decoder_input = PAD_token * torch.ones(
-            (src_batch.size(0), MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
-        )  # Shape: (1, 1)
-        decoder_input[:, 0] = SOS_token
-        decoder_input = decoder_input.to(device)
-        for t in range(1, MAX_SENTENCE_LENGTH):
-            # Only pass the portion of ys that we have generated so far
-            tgt_mask, src_padding_mask, tgt_padding_mask = create_mask_on_device(
-                src_batch, decoder_input, device=device
-            )
-            with torch.autocast(device_type=device, dtype=torch.float16, enabled=True):
-                # Run the model with the truncated ys
-                logits = model(
-                    src=src_batch,
-                    tgt=decoder_input,
-                    tgt_mask=tgt_mask,
-                    src_pad_mask=src_padding_mask,
-                    tgt_pad_mask=tgt_padding_mask,  # Try disabling this at inference
-                )
-            last_logits = logits[:, t, :]  # [batch_size, output_vocab_dim]
-            decoder_input[:, t] = last_logits.argmax(-1)
         output_tokens = tokens_to_words(tokens=tgt_batch, lang=output_lang)
-        translated_tokens = tokens_to_words(tokens=decoder_input, lang=output_lang)
         target_tokens = [" ".join(o) for o in output_tokens]
 
         print(f" ==== \n")
         for tr, ta in zip(translated_tokens, target_tokens):
             print(f"Input: {ta}, \n translated_tokens: {tr} ")
+
+
+@torch.inference_mode()
+def translate(model, src_sentence, output_lang):
+    src_tokens = input_lang_sentence_to_tokens(
+        src_sentence=src_sentence, input_lang=input_lang
+    )
+    src_batch = PAD_token * torch.ones(
+        (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
+    )  # Shape: (1, 1)
+    src_batch[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
+    translated_tokens = src_batch_to_translated_tokens(src_batch=src_batch)
+    print(f"Input: {src_sentence}, \n translated_tokens: {translated_tokens} ")
 
 
 if __name__ == "__main__":
@@ -492,8 +517,8 @@ if __name__ == "__main__":
         output_token_size=OUTPUT_TOKEN_SIZE,
         dim_model=EMBEDDING_DIM,
         num_heads=NUM_HEADS,
-        num_encoder_layers=ENCODER_LAYER_NUM,
-        num_decoder_layers=DECODER_LAYER_NUM,
+        num_encoder_layers=ENCODER_DECODER_LAYER_NUM,
+        num_decoder_layers=ENCODER_DECODER_LAYER_NUM,
         dropout_p=0.1,
     ).to(device)
     opt = optim.AdamW(model.parameters(), lr=1e-4)
@@ -504,50 +529,35 @@ if __name__ == "__main__":
         path=MODEL_PATH,
         device=device,
     )
-    if not args.eval:
-        fit(
-            model,
-            opt,
-            loss_fn,
-            train_dataloader,
-            epochs=NUM_EPOCHS,
-            start_epoch=start_epoch,
-        )
-    model.eval()
-    validate(model, train_dataloader)
-
-#################################################################
-# Graveyard
-#################################################################
-# TODO debug
-# summary(model,
-#         [
-#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long),
-#             torch.tensor((BATCH_SIZE, MAX_SENTENCE_LENGTH), dtype=torch.long),
-#         ], device=str(device)
-# )
-# @torch.inference_mode()
-# def translate(model, src_sentence, output_lang):
-#     src_tokens = input_lang_sentence_to_tokens(
-#         src_sentence=src_sentence, input_lang=input_lang
-#     )
-#     src = PAD_token * torch.ones(
-#         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
-#     )  # Shape: (1, 1)
-#     src[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-#     src = src.to(device)
-# test_sentences = [
-#     "Eres tú",
-#     "Eres mala.",
-#     "Eres grande.",
-#     "Estás triste.",
-#     "estoy en el banco",
-#     "soy tom",
-#     "soy gorda",
-#     "estoy en forma",
-#     "Estoy trabajando.",
-#     "Estoy levantado.",
-#     "Estoy de acuerdo.",
-# ]
-# for test_sentence in test_sentences:
-#     translate(model, test_sentence, output_lang)
+    if args.summary:
+        input_size = [(MAX_SENTENCE_LENGTH,), (MAX_SENTENCE_LENGTH,)]
+        model_summary(model, input_size, batch_dim=0, dtypes=[torch.long, torch.long])
+    else:
+        if not args.custom:
+            if not args.eval:
+                fit(
+                    model,
+                    opt,
+                    loss_fn,
+                    train_dataloader,
+                    epochs=NUM_EPOCHS,
+                    start_epoch=start_epoch,
+                )
+            model.eval()
+            validate(model, train_dataloader)
+        else:
+            test_sentences = [
+                "Eres tú",
+                "Eres mala.",
+                "Eres grande.",
+                "Estás triste.",
+                "estoy en el banco",
+                "soy tom",
+                "soy gorda",
+                "estoy en forma",
+                "Estoy trabajando.",
+                "Estoy levantado.",
+                "Estoy de acuerdo.",
+            ]
+            for test_sentence in test_sentences:
+                translate(model, test_sentence, output_lang)

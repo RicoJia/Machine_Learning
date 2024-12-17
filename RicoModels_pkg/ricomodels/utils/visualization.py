@@ -8,6 +8,7 @@ import time
 import matplotlib.pyplot as plt
 import torch
 import wandb
+from torchinfo import summary
 
 RESULTS_DIR = "/tmp/results/"
 
@@ -35,8 +36,8 @@ def get_total_weight_norm(model):
     for _, param in model.named_parameters():
         if param.requires_grad:
             param_norm = param.norm(2)
-            total_norm += param_norm**2
-    return total_norm**0.5
+            total_norm += param_norm ** 2
+    return total_norm ** 0.5
 
 
 def setup_results_dir_once():
@@ -45,6 +46,13 @@ def setup_results_dir_once():
             shutil.rmtree(RESULTS_DIR)
         os.mkdir(RESULTS_DIR)
         setup_results_dir_once.called = True
+
+
+def model_summary(model, input_size, batch_dim, dtypes=[]):
+    # TODO print the torch model summary, and check if any model has nan
+    if not isinstance(dtypes, list):
+        raise ValueError("dtypes must be a list")
+    summary(model, input_size, batch_dim=batch_dim, dtypes=dtypes)
 
 
 class TrainingTimer:
