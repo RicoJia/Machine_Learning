@@ -37,7 +37,7 @@ EMBEDDING_DIM = 64
 NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
-ENCODER_DECODER_LAYER_NUM = 5
+ENCODER_DECODER_LAYER_NUM = 3
 NUM_EPOCHS = 300
 GRADIENT_CLIPPED_NORM_MAX = 5.0
 TEACHER_FORCING_RATIO_MIN = 0.0
@@ -46,11 +46,10 @@ INPUT_TOKEN_SIZE = input_lang.n_words
 OUTPUT_TOKEN_SIZE = output_lang.n_words
 # Not recommended, because in certain predictions, EOS might yield the same loss as wrong predictions.
 TERMINATE_TRAINING_UPON_EOS = False
-WEIGHT_TYING = False
 MODEL_PATH = os.path.join(
     get_package_dir(),
     "og_transformer",
-    f"spanish2english_{MAX_SENTENCE_LENGTH}tokens_{EMBEDDING_DIM}dim_{ENCODER_DECODER_LAYER_NUM}layers_{'w' if WEIGHT_TYING else 'nw'}.pth",
+    f"spanish2english_{MAX_SENTENCE_LENGTH}tokens_{EMBEDDING_DIM}dim_{ENCODER_DECODER_LAYER_NUM}layers_{INPUT_TOKEN_SIZE}i.pth",
 )
 
 
@@ -152,14 +151,10 @@ class Transformer(nn.Module):
             embedding_size=dim_model,
             dropout=dropout_p,
         )
-        if WEIGHT_TYING:
-            self.encoder_decoder_embedding = nn.Embedding(input_token_size, dim_model)
-            nn.init.xavier_uniform_(self.encoder_decoder_embedding.weight)
-        else:
-            self.encoder_embedding = nn.Embedding(input_token_size, dim_model)
-            nn.init.xavier_uniform_(self.encoder_embedding.weight)
-            self.decoder_embedding = nn.Embedding(output_token_size, dim_model)
-            nn.init.xavier_uniform_(self.decoder_embedding.weight)
+        self.encoder_embedding = nn.Embedding(input_token_size, dim_model)
+        nn.init.xavier_uniform_(self.encoder_embedding.weight)
+        self.decoder_embedding = nn.Embedding(output_token_size, dim_model)
+        nn.init.xavier_uniform_(self.decoder_embedding.weight)
         self.transformer = nn.Transformer(
             d_model=dim_model,
             nhead=num_heads,
@@ -190,12 +185,8 @@ class Transformer(nn.Module):
             src, tgt, device=device
         )
         # Embedding + positional encoding - Out size = (batch_size, sequence length, dim_model)
-        if WEIGHT_TYING:
-            src = self.encoder_decoder_embedding(src) * math.sqrt(self.dim_model)
-            tgt = self.encoder_decoder_embedding(tgt) * math.sqrt(self.dim_model)
-        else:
-            src = self.encoder_embedding(src) * math.sqrt(self.dim_model)
-            tgt = self.decoder_embedding(tgt) * math.sqrt(self.dim_model)
+        src = self.encoder_embedding(src) * math.sqrt(self.dim_model)
+        tgt = self.decoder_embedding(tgt) * math.sqrt(self.dim_model)
         src = self.positional_encoder(src)
         tgt = self.positional_encoder(tgt)
 
@@ -360,18 +351,6 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
     for epoch in range(start_epoch, epochs):
         torch.cuda.empty_cache()
         print("-" * 25, f"Epoch {epoch + 1}", "-" * 25)
-
-        # with torch.profiler.profile(
-        #     activities=[
-        #         torch.profiler.ProfilerActivity.CPU,
-        #         torch.profiler.ProfilerActivity.CUDA,
-        #     ],
-        #     schedule=torch.profiler.schedule(wait=1, warmup=1, active=3),
-        #     on_trace_ready=torch.profiler.tensorboard_trace_handler("./log"),
-        #     record_shapes=True,
-        #     profile_memory=True,
-        #     with_stack=True,
-        # ) as prof:
         train_loss = train_epoch(
             model,
             opt,
@@ -379,7 +358,6 @@ def fit(model, opt, loss_fn, train_dataloader, epochs, start_epoch):
             train_dataloader,
             teacher_forcing_ratio=scheduled_teacher_forcing_ratios[epoch],
         )
-        # prof.step()
 
         print(f"Training loss: {train_loss:.4f} \n")
         wandb_logger.log(
@@ -452,7 +430,7 @@ def training_logits_to_outuput_sentence(logits_batch, tgt_batch, output_lang):
         )
 
 
-def src_batch_to_translated_tokens(src_batch: torch.Tensor) -> List[List[str]]:
+def src_batch_to_translated_tokens(model, src_batch: torch.Tensor) -> List[List[str]]:
     """Translate a batch of input tokens to a list of output tokens
 
     Args:
@@ -485,7 +463,9 @@ def src_batch_to_translated_tokens(src_batch: torch.Tensor) -> List[List[str]]:
 @torch.inference_mode()
 def validate(model, dataloader):
     for i, (src_batch, tgt_batch) in enumerate(dataloader):
-        translated_tokens = src_batch_to_translated_tokens(src_batch=src_batch)
+        translated_tokens = src_batch_to_translated_tokens(
+            model=model, src_batch=src_batch
+        )
         tgt_batch = tgt_batch.to(device)
         output_tokens = tokens_to_words(tokens=tgt_batch, lang=output_lang)
         target_tokens = [" ".join(o) for o in output_tokens]
@@ -504,7 +484,7 @@ def translate(model, src_sentence, output_lang):
         (1, MAX_SENTENCE_LENGTH), dtype=torch.long, device=device
     )  # Shape: (1, 1)
     src_batch[0, : len(src_tokens)] = torch.tensor(src_tokens, dtype=torch.long)
-    translated_tokens = src_batch_to_translated_tokens(src_batch=src_batch)
+    translated_tokens = src_batch_to_translated_tokens(model=model, src_batch=src_batch)
     print(f"Input: {src_sentence}, \n translated_tokens: {translated_tokens} ")
 
 

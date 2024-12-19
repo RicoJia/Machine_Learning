@@ -87,7 +87,8 @@ def filterPair(p):
     return (
         len(p[0].split(" ")) <= MAX_LENGTH - 2
         and len(p[1].split(" ")) <= MAX_LENGTH - 2
-        and p[1].startswith(eng_prefixes)
+        # TODO: experimenting
+        # and p[1].startswith(eng_prefixes)
     )
 
 
@@ -155,7 +156,11 @@ def get_dataloader(batch_size):
     (MAX_SENTENCE_LENGTH)
 
     """
-    input_lang, output_lang, pairs = prepareData("spa", "eng", True)
+
+    # 🪦 Reverse=True is weird, I feel ya. It's because the dataset we use spa-eng.txt actually has english on the left
+    # Spanish on the right. TODO: input language here is "eng", but really it's spanish content. It doesn't break my code now,
+    # but needs to be fixed
+    input_lang, output_lang, pairs = prepareData("spa", "eng", reverse=True)
 
     n = len(pairs)
     input_ids = PAD_token * np.ones((n, MAX_LENGTH), dtype=np.int32)
