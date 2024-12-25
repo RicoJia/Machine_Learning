@@ -21,7 +21,6 @@ import os
 import argparse
 
 BATCH_SIZE = 16
-# NUM_KEYS = NUM_QUERIES = MAX_SENTENCE_LENGTH
 NUM_KEYS = 50
 NUM_QUERIES = 50
 EMBEDDING_DIM = 512
@@ -110,14 +109,6 @@ def greedy_decode(model, src, src_key_padding_mask, max_len, start_symbol):
         ys = torch.cat(
             [ys, torch.tensor([[next_word]], device=device)], dim=1
         )  # Shape: (1, tgt_seq_len + 1)
-        # #TODO Remember to remove
-        # print(f'============================')
-        # print(f'Rico: prob {prob}')
-        # print(f'Rico: tgt {tgt_emb}')
-        # print(f"Time step {i + 1}:")
-        # print(f"  ys: {ys}")
-        # print(f"  next_word: {next_word}")
-        # print(f"  prob[max]: {prob[next_word].item()}")
         # Stop decoding if the end-of-sequence token is generated
         if next_word == EOS_token:
             break

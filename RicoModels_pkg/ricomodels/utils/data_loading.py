@@ -239,7 +239,7 @@ class BaseDataset(Dataset):
         self.labels = sorted(os.listdir(self._labels_dir))
         assert len(self.images) == len(
             self.labels
-        ), "Number of images and labels should be equal."
+        ), f"Number of images: {len(self.images)} and labels {len(self.labels)} should be equal."
 
         self._max_class = 0 if manual_find_class_num else None
         self.task_mode = task_mode
@@ -322,8 +322,8 @@ class GTA5Dataset(BaseDataset):
                 except Exception as exc:
                     print(f"An error occurred with {url}: {exc}")
         super().__init__(
-            images_dir=images_dir,
-            labels_dir=labels_dir,
+            images_dir=images_dir + "/images",
+            labels_dir=labels_dir + "/labels",
             task_mode=TaskMode.IMAGE_SEGMENTATION,
         )
 

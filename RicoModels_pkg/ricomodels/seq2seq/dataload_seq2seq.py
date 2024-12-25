@@ -174,12 +174,11 @@ def get_dataloader(batch_size):
 
     for i in range(10):
         print(f"input:{pairs[i]}")
-    # TODO Remember to remove
     print(f"Rico: example token: {input_ids[0]}")
     print(f"Number of sentences is {len(pairs)}")
 
     train_data = TensorDataset(
-        torch.LongTensor(input_ids).to(device), torch.LongTensor(target_ids).to(device)
+        torch.LongTensor(input_ids), torch.LongTensor(target_ids)
     )
 
     train_sampler = RandomSampler(train_data)
@@ -187,9 +186,8 @@ def get_dataloader(batch_size):
         train_data,
         sampler=train_sampler,
         batch_size=batch_size,
-        # TODO
-        # num_workers=2,
-        # pin_memory=True,
+        num_workers=2,
+        pin_memory=True,
     )
     return input_lang, output_lang, train_dataloader, pairs
 
