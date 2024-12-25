@@ -1,6 +1,8 @@
 # jetson-containers build --name=rico_cuda_image jupyterlab pytorch torchvision ros:iron-desktop
 # On desktop, it's equivalent to rwthika/ros2-ml
 # docker exec -it ros2-image-processing-rico-container bash
+# Intro:
+#   - tensorboard uses port 6006
 show_help(){
   echo "Usage: $0 [-j] [-h]"
   echo
@@ -106,6 +108,7 @@ else
         -v $XAUTH:$XAUTH \
         -v /dev:/dev:rw \
         -p 8888:8888 \
+        -p 6006:6006 \
         -w /home/${USER}/${THIS_DIRECTORY_NAME} \
         -itd --rm \
         --runtime nvidia \

@@ -8,6 +8,7 @@ import time
 import matplotlib.pyplot as plt
 import torch
 import wandb
+from torchinfo import summary
 
 RESULTS_DIR = "/tmp/results/"
 
@@ -27,16 +28,21 @@ def wandb_weight_histogram_logging(model, epoch):
             )
 
 
-def get_total_weight_norm(model):
+def check_get_total_weight_norm(model):
     """
     Returns mean square root norm of params
     """
     total_norm = 0
-    for _, param in model.named_parameters():
+    for name, param in model.named_parameters():
         if param.requires_grad:
-            param_norm = param.norm(2)
-            total_norm += param_norm**2
-    return total_norm**0.5
+            if torch.isnan(param).any():
+                print(f"NaN found in param: {name}")
+            elif torch.isinf(param).any():
+                print(f"Inf found in param: {name}")
+            else:
+                param_norm = param.norm(2)
+                total_norm += param_norm ** 2
+    return total_norm ** 0.5
 
 
 def setup_results_dir_once():
@@ -45,6 +51,17 @@ def setup_results_dir_once():
             shutil.rmtree(RESULTS_DIR)
         os.mkdir(RESULTS_DIR)
         setup_results_dir_once.called = True
+
+
+def model_summary(model, input_size, batch_dim, dtypes=[]):
+    """
+    Print the torch model summary, and check if any model has nan
+    """
+    if not isinstance(dtypes, list):
+        raise ValueError("dtypes must be a list")
+    summary(model, input_size, batch_dim=batch_dim, dtypes=dtypes)
+    total_weight = check_get_total_weight_norm(model)
+    print(f"Total weight: {total_weight}")
 
 
 class TrainingTimer:
@@ -93,9 +110,8 @@ def visualize_image_class_names(
         label_text = ""
     pred = binary_label_to_name(pred_cat_ids, class_names)
     label_text += "Predictions: " + ", ".join(pred) + "\n"
+    print(f"==== {label_text}")
     plt.title(label_text, fontsize=10)
-    # plt.gcf().text(0.5, 0.95, label_text, fontsize=12, ha='center',
-    #             bbox=dict(facecolor='white', alpha=0.8, edgecolor='black'))
     tiempo = int(time.time() * 1000)
     plt.savefig(RESULTS_DIR + str(tiempo) + ".png")
     plt.show()
