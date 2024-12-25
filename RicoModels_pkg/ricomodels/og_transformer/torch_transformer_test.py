@@ -2,6 +2,7 @@
 # - https://towardsdatascience.com/a-detailed-guide-to-pytorchs-nn-transformer-module-c80afbc9ffb1
 # - Another example: https://iiosnail.blogspot.com/2024/10/nn-transfomer.html
 # - https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html
+from typing import List
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,9 +18,9 @@ from ricomodels.seq2seq.dataload_seq2seq import (
     input_lang_sentence_to_tokens,
 )
 from ricomodels.utils.data_loading import get_package_dir
-from ricomodels.og_transformer.translator_transformer import (
-    save_model_and_optimizer,
+from ricomodels.utils.training_tools import (
     load_model_and_optimizer,
+    save_model_and_optimizer,
 )
 from ricomodels.utils.training_tools import get_scheduled_probability, clip_gradients
 import os
@@ -28,7 +29,6 @@ import numpy as np
 from tqdm import tqdm
 import wandb
 from ricomodels.utils.visualization import TrainingTimer, model_summary
-from typing import List
 
 EFFECTIVE_BATCH_SIZE = 256
 BATCH_SIZE = 64
@@ -38,7 +38,7 @@ NUM_HEADS = 8
 DROPOUT_RATE = 0.1
 MAX_SENTENCE_LENGTH = MAX_LENGTH
 ENCODER_DECODER_LAYER_NUM = 3
-NUM_EPOCHS = 900
+NUM_EPOCHS = 1200
 GRADIENT_CLIPPED_NORM_MAX = 5.0
 TEACHER_FORCING_RATIO_MIN = 0.0
 input_lang, output_lang, train_dataloader, pairs = get_dataloader(BATCH_SIZE)
@@ -91,12 +91,14 @@ def create_mask_on_device(src, tgt, device):
     """
     # If matrix = [1,2,3,0,0,0] where pad_token=0, the result mask is
     # [False, False, False, True, True, True]
-    src_padding_mask = (src == PAD_token).to(device)
+    src_padding_mask = (src == PAD_token).to(device, non_blocking=True)
     if tgt is not None:
-        tgt_padding_mask = (tgt == PAD_token).to(device)
+        tgt_padding_mask = (tgt == PAD_token).to(device, non_blocking=True)
         tgt_seq_len = tgt.size(1)
         # 0 = unmask
-        tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(device)
+        tgt_mask = generate_square_subsequent_mask(tgt_seq_len).to(
+            device, non_blocking=True
+        )
     else:
         tgt_padding_mask = None
         tgt_mask = None
@@ -286,12 +288,12 @@ def train_epoch(model, optimizer, criterion, dataloader, teacher_forcing_ratio):
     with torch.autograd.set_detect_anomaly(args.debug):
         with tqdm(total=len(dataloader), desc=f"Training", unit="batch") as pbar:
             for i, (src_batch, tgt_batch) in enumerate(dataloader):
-                tgt_batch = tgt_batch.to(device)
-                src_batch = src_batch.to(device)
+                tgt_batch = tgt_batch.to(device, non_blocking=True)
+                src_batch = src_batch.to(device, non_blocking=True)
                 decoder_input = (
                     tgt_batch.clone().detach()
                 )  # [batch_size, 1], a bunch of <SOS>
-                decoder_input = decoder_input.to(device)
+                decoder_input = decoder_input.to(device, non_blocking=True)
                 batch_loss = train_with_teacher_enforcing(
                     src_batch=src_batch,
                     tgt_batch=tgt_batch,
@@ -538,6 +540,7 @@ if __name__ == "__main__":
                 "Estoy trabajando.",
                 "Estoy levantado.",
                 "Estoy de acuerdo.",
+                "El amor no se acaba",
             ]
             for test_sentence in test_sentences:
                 translate(model, test_sentence, output_lang)

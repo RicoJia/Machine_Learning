@@ -13,7 +13,7 @@ from ricomodels.utils.losses import (
     F1ScoreCounter,
 )
 from ricomodels.utils.visualization import (
-    get_total_weight_norm,
+    check_get_total_weight_norm,
     visualize_image_class_names,
     visualize_image_target_mask,
 )

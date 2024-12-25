@@ -34,6 +34,8 @@ from torchvision.transforms import CenterCrop, v2
 from torchvision.transforms.functional import InterpolationMode
 from tqdm import tqdm
 
+np.random.seed(42)
+
 
 def replace_tensor_val(tensor, a, b):
     # albumentations could pass in extra args
@@ -57,10 +59,17 @@ def replace_mask_values(mask, ignore_index):
     return replace_tensor_val(mask, 255, ignore_index).astype(np.int64)
 
 
+def download_and_unzip(url, path, dataset_dir, msg):
+    os.makedirs(dataset_dir, exist_ok=True)
+    if not os.path.exists(path):
+        logging.warning(msg)
+        subprocess.run(["wget", url, "-O", path + ".zip"], check=True)
+        subprocess.run(["unzip", path + ".zip", "-d", dataset_dir], check=True)
+        subprocess.run(["rm", "-rf", path + ".zip"], check=True)
+
+
 DATA_DIR = os.path.join(get_package_dir(), "data")
 IGNORE_INDEX = 0
-
-np.random.seed(42)
 
 PRED_SEG_AUGMENTATION_TRANSFORMS = A.Compose(
     [
@@ -430,15 +439,6 @@ class VOCSegmentationDataset(Dataset):
 
     def __len__(self):
         return len(self._dataset)
-
-
-def download_and_unzip(url, path, dataset_dir, msg):
-    os.makedirs(dataset_dir, exist_ok=True)
-    if not os.path.exists(path):
-        logging.warning(msg)
-        subprocess.run(["wget", url, "-O", path + ".zip"], check=True)
-        subprocess.run(["unzip", path + ".zip", "-d", dataset_dir], check=True)
-        subprocess.run(["rm", "-rf", path + ".zip"], check=True)
 
 
 class COCODataset:
