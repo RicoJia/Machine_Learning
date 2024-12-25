@@ -3,7 +3,6 @@
 import os
 from typing import List, Tuple
 
-import numpy as np
 import torch
 from ricomodels.backbones.mobilenetv2.mobilenet_v2 import MobileNetV2
 from ricomodels.utils.data_loading import (
@@ -13,22 +12,19 @@ from ricomodels.utils.data_loading import (
     TaskMode,
     get_package_dir,
 )
-from ricomodels.utils.losses import MULTICLASS_CLASSIFICATION_THRE, FocalLoss
-from ricomodels.utils.predict_tools import resize_prediction
+from ricomodels.utils.losses import MULTICLASS_CLASSIFICATION_THRE
 from ricomodels.utils.training_tools import load_model
-from ricomodels.utils.visualization import visualize_image_class_names
-from torch.nn import functional as F
-from torchvision import models
+from ricomodels.utils.visualization import visualize_image_class_names, model_summary
 from tqdm import tqdm
 
 
 class BackbonePredictBench:
-    def __init__(self, model, dataloader) -> None:
+    def __init__(self, model, dataloader, device) -> None:
         """
         Args:
             model : model that's loaded or downloaded
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         # Will download the model for the first time, takes about 10s
         self.model = model
         self.model.to(self.device)
@@ -64,9 +60,6 @@ class BackbonePredictBench:
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    from PIL import Image
-
     val_dataset = COCODataset(
         split="val", task_mode=TaskMode.MULTI_LABEL_IMAGE_CLASSIFICATION
     )
@@ -84,15 +77,22 @@ if __name__ == "__main__":
         pin_memory=True,
     )
     model = MobileNetV2(num_classes=len(class_names), output_stride=4)
+    device = (torch.device("cuda" if torch.cuda.is_available() else "cpu"),)
+    # device = torch.device("cpu")
     MODEL_PATH = os.path.join(
         get_package_dir(), "backbones/mobilenetv2/mobilenetv2.pth"
     )
-    load_model(
-        model_path=MODEL_PATH,
+    load_model(model_path=MODEL_PATH, model=model, device=device)
+    model_summary(
         model=model,
-        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        input_size=(
+            [
+                256,
+            ]
+        ),
+        batch_dim=0,
     )
-    bench = BackbonePredictBench(dataloader=dataloader, model=model)
+    bench = BackbonePredictBench(dataloader=dataloader, model=model, device=device)
     outputs, images = bench.predict()
     for img, pred in zip(images, outputs):
         visualize_image_class_names(

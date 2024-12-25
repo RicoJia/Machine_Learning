@@ -226,7 +226,6 @@ class MobileNetV2(nn.Module):
 
     def forward(self, x):
         x = self.layers(x)
-        # TODO: ?
         x = x.mean([2, 3])
         x = self.classifier(x)
         return x
